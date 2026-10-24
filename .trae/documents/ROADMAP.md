@@ -88,10 +88,11 @@
 - **依赖**：P0-3（RBAC 先做好，动态菜单才有数据来源）
 - **实施摘要**：后端新增 sys_menu + sys_role_menu 两张表（DDL 入 schema.sql）+ MenuController `GET /api/user/menu` 返回 `{menus, permissions}`；前端 permission.js 指令 + Login 拉取存 localStorage + Home.vue 数据驱动侧边栏（兜底静态菜单）+ request.js X-Trace-Id；**方案修正**：保留静态路由表 + meta.role 守卫（不重写为 addRoute，降低风险），不引入 pinia（存 localStorage）
 
-### P2-1｜收尾：README / 接口文档 / SQL 脚本汇总（低优）
+### P2-1｜收尾：README / 接口文档 / SQL 脚本汇总（低优）✅ **已完成 2026-10-24**
 - **目标**：所有阶段完成后，README 最终对齐、OpenAPI 文档校验（Knife4j `/doc.html`）、6 张业务表 + 新增表的 CREATE TABLE SQL 统一输出到 `docs/schema.sql`
 - **影响文件**：`README.md`、新增 `docs/schema.sql`
 - **依赖**：所有 P0 / P1 阶段
+- **实施摘要**：README 对齐 16 项核心能力 + 4 个批量接口 + /api/user/menu 接口清单 + 亮点一（双粒度锁）/亮点三（Outbox）改写 + JDK 21 编译提示 + 12 张表部署说明；新增 `docs/seed.sql`（sys_user 3 账号 BCrypt 真实 hash + RBAC + 菜单 + 演示会议室）；修复 schema.sql sys_user 列名 `nickname`→`real_name`（实体映射不一致 bug）；schema.sql 补 sys_user 预置账号；核对 12 张表 CREATE 齐全
 
 ---
 

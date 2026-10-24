@@ -14,7 +14,7 @@ CREATE TABLE `sys_user` (
     `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `username`     VARCHAR(50)  NOT NULL COMMENT '账号',
     `password`     VARCHAR(100) NOT NULL COMMENT '密码（BCrypt 密文）',
-    `nickname`     VARCHAR(50)  DEFAULT NULL COMMENT '真实姓名',
+    `real_name`    VARCHAR(50)  DEFAULT NULL COMMENT '真实姓名',
     `phone`        VARCHAR(20)  DEFAULT NULL COMMENT '手机号',
     `role`         TINYINT      NOT NULL COMMENT '角色 0=普通用户 1=管理员',
     `enabled`      TINYINT      DEFAULT 1 COMMENT '是否启用 1=启用 0=禁用',
@@ -168,6 +168,14 @@ CREATE TABLE `sys_role_permission` (
     `permission_id` INT     NOT NULL COMMENT '外键 sys_permission.id',
     PRIMARY KEY (`role_id`, `permission_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色-权限关联表';
+
+-- ========================================================================
+-- 预置账号（密码均为 BCrypt 加密后的 123456；与 docs/seed.sql 同源，修改需同步两处）
+-- ========================================================================
+INSERT INTO `sys_user` (`username`, `password`, `real_name`, `phone`, `role`, `enabled`) VALUES
+    ('admin', '$2a$10$9VeYqh.kg96L7vOEeZ2JXOHhkhKT34qkio9vhcnWyV4fXu1Pu5jeC', '系统管理员', '13800000000', 1, 1),
+    ('user1', '$2a$10$3a4iy0l/1NoK82g30qdbMelcfnW2bMKnJokhElTK1XppBHm7k3tBW', '员工一号', '13800000001', 0, 1),
+    ('user2', '$2a$10$Lx4xCm0JJGBmKd8evuHspuKn48Q7MgIQzMNFrPy91quU7pp0.OLX2', '员工二号', '13800000002', 0, 1);
 
 -- ========================================================================
 -- P0-3 RBAC 预置数据

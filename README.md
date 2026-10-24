@@ -3,8 +3,8 @@
 ## 项目简介
 
 会议室预约管理系统，**前后端分离架构**，面向企业内部使用，完成分布式改造，支持多实例集群部署。
-后端采用 Spring Boot 3.3.4 + Spring Cloud Alibaba，使用 **Redisson分布式锁（Controller层锁包事务） + MySQL FOR UPDATE行锁** 双重机制解决多实例并发预约冲突；基于Nacos实现服务注册与发现；RocketMQ异步发送预约通知（事务提交后afterCommit回调中发送，避免DB回滚但MQ已发的脏通知），实现业务与通知解耦。
-前端基于 Vue3 + Vite + Element Plus，提供工作台、预约日历、会议室管理、预约审批、用户管理、操作日志等完整页面，支持角色权限控制，交互体验优化（侧边栏折叠、双视图展示、批量操作、二次确认、防重复提交）。
+后端采用 Spring Boot 3.3.4 + Spring Cloud Alibaba，使用 **Redisson分布式锁（Controller层锁包事务） + MySQL FOR UPDATE行锁** 双重机制解决多实例并发预约冲突；基于Nacos实现服务注册发现与**配置中心热刷新（@RefreshScope）**；RocketMQ 预约通知采用**本地消息表（Outbox Pattern）+ 定时任务补发**实现可靠消息最终一致性；权限体系为 **RBAC 细粒度权限（@RequiresPermission + AOP）** 与 @RequireAdmin 双轨并行；写操作接口带**幂等拦截（X-Request-Id + Redisson SETNX）** 防重复提交；会议室/预约**软删除（@TableLogic）**；全链路 **MDC TraceId** 日志追踪；支持**批量审批/批量启停/批量删除**。
+前端基于 Vue3 + Vite + Element Plus，提供工作台、预约日历、会议室管理、预约审批、用户管理、操作日志等完整页面，**侧边栏菜单由后端 `/api/user/menu` 动态下发**，按钮级权限由 **v-permission 指令** 控制，交互体验优化（侧边栏折叠、双视图展示、批量操作、二次确认、防重复提交）。
 
 > 
 > 后端工程：`admin_system_backend`
@@ -54,6 +54,14 @@
 6. **异步消息推送预约通知**：RocketMQ发送预约提交、审批通知；MQ为可选组件，未配置时自动跳过消息发送，不影响主业务流程。
 7. **操作日志记录**：记录用户操作、请求IP、请求方法，支持管理员分页查询。
 8. **业务异常统一收敛**：Service 层主动抛出 `BusinessException(code, msg)`，由 `GlobalExceptionHandler` 最靠前分支捕获并返回 `Result.fail(code, msg)`；单参构造器默认 code=400。原有参数校验、404、兜底 Exception 分支保持不变。
+9. **RBAC 细粒度权限（P0-3）**：`sys_role` / `sys_permission` / `sys_role_permission` 三张表 + `@RequiresPermission("模块:动作")` 注解 + `PermissionAspect` AOP 切面（从 request 读 role → 联查权限码匹配），与 `@RequireAdmin`（TokenInterceptor）双轨并行；扩展新角色只需 INSERT 角色 + 映射，无需改代码。
+10. **可靠消息最终一致性（P0-2）**：`sys_outbox` 本地消息表 + `OutboxScheduler` 定时任务（每 5s 扫描），事务内写 outbox（与业务同生共死），定时任务异步发 MQ，失败自动重试，retry_count >= 3 标记死信；msg_id 用 UUID，消费侧可去重。MQ broker 宕机不影响预约主流程，恢复后自动补发。
+11. **幂等防重复提交（P0-4）**：`IdempotentInterceptor` + Redisson `RBucket.trySet`（SETNX+TTL 60s），key=`idempotent:{userId}:{requestId}`；`X-Request-Id` Header **可选**（不传则跳过降级），重复提交返回 400；Redis 不可达时 warn + 放行（幂等是增强不是安全屏障）；只拦截 15 条写操作路径，GET 不受影响。
+12. **软删除 + 索引优化（P1-1）**：`meeting_room` / `meeting_booking` 加 `deleted` 列 + `@TableLogic`，删除变 UPDATE，杜绝物理删除外键 CASCADE 风险；`meeting_booking` 复合索引 `(room_id, start_time, end_time)` + `(user_id, res_status)`、`operation_log(create_time)` 支撑高频查询。
+13. **批量接口（P1-2）**：`POST /api/booking/batch-approve`、`PUT /api/room/batch-enable|batch-disable`、`DELETE /api/room/batch-delete`；批量在 Service 循环内复用单次业务校验（含逐元素分布式锁），任一失败整体事务回滚，错误信息带失败元素 id。
+14. **Nacos 动态配置（P1-3）**：`spring.config.import: optional:nacos:admin-system-backend.yaml`，jwt / rocketmq 配置可放配置中心，`JwtProperties` 加 `@RefreshScope` 热刷新；`optional:` 前缀保证 Nacos 宕机时用本地默认值正常启动。
+15. **MDC 全链路 TraceId（P1-4）**：`TraceIdInterceptor`（order=-100，先于 TokenInterceptor）入站继承或生成 `X-Trace-Id` → MDC + 响应头；logback pattern 含 `[%X{traceId:-}]`，同一请求链路日志可用 traceId 串联（含 401 拒绝日志）。
+16. **动态菜单 + 按钮权限（P1-5）**：`sys_menu` / `sys_role_menu` 两张表，`GET /api/user/menu` 按角色返回菜单树 + 权限码数组；前端登录后存 localStorage，侧边栏数据驱动渲染（接口失败兜底静态菜单），`v-permission` 指令控制按钮显隐。
 
 ### 前端页面能力
 
@@ -105,6 +113,13 @@
 | GET | `/api/booking/user/page` | 同上 + 拦截器自动注入userId | 查询当前登录用户的预约记录 | 登录用户 |
 | GET | `/api/booking/admin/query` | 同adminPage | adminPage别名接口 | 管理员 |
 | GET | `/api/booking/user/query` | 同userPage | userPage别名接口 | 登录用户 |
+| POST | `/api/booking/batch-approve` | BookingBatchApproveDTO (bookingIds, status, rejectReason) | Service 循环内逐元素持 `booking:approve:{bookingId}` 锁 + 复用单次 approve 校验；任一失败整体事务回滚 | 管理员 |
+
+### 菜单模块 MenuController（P1-5）
+
+| 请求方法 | URL | 返回 data | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/user/menu` | `{ menus: 菜单树（按角色联查 sys_role_menu 过滤）, permissions: 权限码数组 }` | 登录用户 |
 
 > **分布式锁边界**：Redisson锁由 `MeetingBookingController` 持有（Controller tryLock → Service @Transactional 业务 → finally unlock），事务提交在锁释放之前，避免并发请求读到未提交数据。`submit` / `approve` 走分布式锁；`cancelBooking` 只有状态更新、无时段冲突语义，不走分布式锁（DB FOR UPDATE 已足够）。Controller 锁常量 `LOCK_KEY_PREFIX = "booking:room:"` 会议室粒度串行化。
 
@@ -125,6 +140,9 @@
 | GET | `/api/room/list` | 查询 enabled=1 可用会议室（前端预约弹窗数据源） | 登录用户 |
 | PUT | `/api/room/enable/{id}` | Service `enableRoom`，失败抛 BusinessException | 管理员 |
 | PUT | `/api/room/disable/{id}` | Service `disableRoom`，失败抛 BusinessException | 管理员 |
+| PUT | `/api/room/batch-enable` | RoomBatchDTO (ids)，循环复用单次校验，任一失败整体回滚 | 管理员 |
+| PUT | `/api/room/batch-disable` | 同上 | 管理员 |
+| DELETE | `/api/room/batch-delete` | 同上，复用未完结预约前置校验 | 管理员 |
 
 ### 操作日志 LogController
 
@@ -137,10 +155,13 @@
 ### 亮点一：Redisson分布式锁解决多实例预约并发冲突
 
 **代码位置**：`MeetingBookingController.submit` / `approve`（Controller层抢锁）→ `MeetingBookingServiceImpl`（Service层只持有事务内DB逻辑，不再处理分布式锁）
-**锁Key策略**：`booking:room:{roomId}`，采用**会议室粒度锁**，而非会议室+时间段粒度。
+**锁Key策略（P0-1 已拆分双粒度）**：
+- `submit`：`booking:room:{roomId}` 会议室粒度锁（防同时段冲突必须串行化同会议室全部请求）
+- `approve`：`booking:approve:{bookingId}` 预约单粒度锁（只需串行化同一 bookingId 的并发审批；不同 bookingId 可并行，不再互相阻塞）
+- `batch-approve`（P1-2）：Service 循环内逐元素持 `booking:approve:{bookingId}` 锁（不同时持多锁，无死锁）
 
 > 
-> 原因：如果使用会议室+时间段作为锁key，两个时间重叠但起止时间不同的预约会生成不同锁key，并发请求可同时获取锁，进入数据库校验后产生时间重叠冲突。会议室粒度锁将同一会议室所有预约请求串行执行，从源头规避漏判。
+> submit 为何不用会议室+时间段粒度：两个时间重叠但起止时间不同的预约会生成不同锁key，并发请求可同时获取锁，进入数据库校验后产生时间重叠冲突。会议室粒度锁将同一会议室所有预约请求串行执行，从源头规避漏判。
 
 **锁事务顺序（锁包事务，防止读到未提交数据）**：
 
@@ -202,10 +223,23 @@ java -jar admin_system_backend.jar --server.port=8081
 
 Nacos完成服务注册发现，配合网关可基于服务名负载均衡转发请求到后端实例；Redisson锁保证跨实例下同一会议室预约串行执行。
 
-### 亮点三：RocketMQ异步通知解耦（可选组件）
+### 亮点三：RocketMQ 可靠消息最终一致性（Outbox Pattern，可选组件）
 
-**代码位置**：`BookingNotificationProducer.java`（生产者）+ `MeetingBookingServiceImpl.runAfterCommit`（事务提交后发送）
-**可选加载机制**：Producer Bean仅当配置`rocketmq.name-server`才会创建；Service中`@Autowired(required=false)`注入，对象为null时直接跳过发送逻辑。
+**代码位置**：`sys_outbox` 表 + `OutboxScheduler` 定时任务（`@Scheduled(cron="0/5 * * * * ?")`）+ `BookingNotificationProducer`
+**可选加载机制**：Producer Bean仅当配置`rocketmq.name-server`才会创建；OutboxScheduler 中 `@Autowired(required=false)` 注入，对象为null时跳过发送。
+
+**P0-2 从 afterCommit 直发升级为本地消息表**：
+原方案在事务 afterCommit 回调里直接调 Producer，Producer 异常被 try-catch 吞掉会导致"DB 已提交但通知永远没发"。现方案：
+1. 业务事务内：预约/审批写库的同时 `sys_outbox` 插入 status=0 消息（同事务，同生共死）
+2. 定时任务每 5s 扫描 status=0（或重试次数未超标）的记录，调 Producer 异步发送，成功置 status=1
+3. 失败重试，`retry_count >= 3` 标记 status=2 死信不再重试；`msg_id` 为 UUID，消费侧可去重
+4. MQ broker 宕机期间预约照常成功，broker 恢复后定时任务自动补发
+
+```
+业务事务 { INSERT meeting_booking + INSERT sys_outbox } → commit
+                                                          ↓
+OutboxScheduler 每5s 轮询 status=0 → Producer.asyncSend → 成功 status=1 / 失败 retry_count+1
+```
 
 ```
 // 仅配置name-server才加载该生产者
@@ -472,12 +506,14 @@ meeting-vue/
 | 组件 | 最低要求 | 默认地址 | 配置位置 | 说明 |
 | --- | --- | --- | --- | --- |
 | Redis | 5.x | 127.0.0.1:6379 | `spring.data.redis.*` | **必须最先启动**。RedissonClient Bean 默认 eager 初始化，容器启动阶段就发起 TCP 连接，连不上会导致 BeanCreationException → 容器整体启动中止（MeetingBookingController 依赖注入 RedissonClient）。无密码留空即可 |
-| MySQL | 5.7+ | 127.0.0.1:3306 | `spring.datasource.*` | 创建 `admin_system` 库后执行 6 张表初始化 SQL（README 数据库对照表） |
+| MySQL | 5.7+ | 127.0.0.1:3306 | `spring.datasource.*` | 创建 `admin_system` 库后执行 `docs/schema.sql`（12 张表全量 + 预置数据）；存量库升级执行 schema.sql 末尾增量迁移段；只重置数据用 `docs/seed.sql` |
 | Nacos | 2.x | 127.0.0.1:8848 | `spring.cloud.nacos.discovery.server-addr` | 默认 `fail-fast=false`，连不上只 warn 不阻断。单机 Nacos `ephemeral=false`，集群 `ephemeral=true` |
 | RocketMQ（可选） | 5.x | 127.0.0.1:9876 | `rocketmq.name-server`（注释则不加载） | 不配 name-server → BookingNotificationProducer 不加载 → 预约主流程正常、MQ 通知静默跳过 |
 | Node.js | ≥18（推荐20+） | - | 前端工程 | - |
 
 ### 后端打包与启动
+
+> ⚠️ **编译需 JDK 21**：项目使用 Java 16+ 语法特性，Windows 下若系统默认 JAVA_HOME 指向 JDK 1.8，需先 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 再执行 mvn。
 
 ```
 # Maven打包，跳过单元测试（pom artifactId=adminsystem，版本0.0.1-SNAPSHOT）
@@ -522,7 +558,7 @@ npm run preview
 2. `/api/log/page` 仅管理员可访问，无用户过滤参数，无法实现员工查看本人操作记录。如需该功能需要后端新增接口参数。
 3. 工作台会议室总数接口仅管理员可访问，员工工作台使用可用会议室替代。
 4. 会议室卡片视图图片、设备标签为前端占位，数据库无对应字段，如需真实展示需要后端扩展实体。
-5. 批量审批、批量启停会议室：前端循环调用单条接口，无后端批量接口；后端分页上限100。
+5. ~~批量审批、批量启停会议室：前端循环调用单条接口~~ → **P1-2 已提供后端原生批量接口**（`/api/booking/batch-approve`、`/api/room/batch-*`），事务原子性保证；后端分页上限100。
 6. 后端筛选语义：预约**整段落在查询时间范围内**，跨天跨边界预约可能不会被查询出来。
 
 ## 二次开发指引
@@ -561,7 +597,7 @@ npm run preview
 ```
 # Maven打包（零错误零警告门槛）
 mvn clean package -DskipTests
-# 启动顺序：Redis → MySQL（6张表已初始化）→ Nacos（可选）→ 后端
+# 启动顺序：Redis → MySQL（docs/schema.sql 12张表已初始化）→ Nacos（可选）→ 后端
 # 实例1
 java -jar target/adminsystem-0.0.1-SNAPSHOT.jar --server.port=8080
 # 实例2（相同服务名注册到Nacos集群）

@@ -203,10 +203,10 @@
 ## 阶段 P2-1｜收尾 README / 接口文档 / SQL 验收清单
 
 ### 变更：README 最终对齐 + SQL 脚本汇总 + Knife4j 文档校验
-- [ ] README 最终通读一遍，无遗漏 P0-P1 任何阶段内容
-- [ ] Knife4j `/doc.html` 所有接口能正常打开、返回正确的 Request Body Schema
-- [ ] 输出 `docs/schema.sql`：所有 CREATE TABLE（6 张现有表 + 新增表）
-- [ ] 输出 `docs/seed.sql`：sys_user / sys_role / sys_permission / sys_role_menu / sys_role_permission 的初始化数据
-- [ ] 编译通过
-- [ ] 全量冒烟回归：20 步全部通过
-- [ ] git commit 规范提交：msg 格式 `feat(P2-1): README final align + SQL summary`
+- [x] README 最终通读对齐 P0-P1 全部内容（16 项核心能力 + 批量/菜单接口 + 亮点一/三改写 + JDK 21 提示 + 12 表部署说明）
+- [ ] Knife4j `/doc.html` 所有接口能正常打开、返回正确的 Request Body Schema（运行时验证）
+- [x] `docs/schema.sql`：12 张表 CREATE 齐全（含 sys_outbox / RBAC 3 表 / 菜单 2 表）+ deleted 列 + 3 个索引 + 预置账号
+- [x] `docs/seed.sql`：sys_user（BCrypt 真实 hash）/ sys_role / sys_permission / sys_role_permission / sys_menu / sys_role_menu / 演示会议室，可独立执行
+- [x] 顺手修复：schema.sql sys_user 列名 `nickname`→`real_name`（与实体 @TableField("real_name") 一致）
+- [ ] 全量冒烟回归：20 步全部通过（运行时验证，需先执行 schema.sql 或 seed.sql 保证预置账号存在）
+- [ ] git commit 规范提交：msg 格式 `docs(P2-1): README final align + SQL summary`（等用户指令）

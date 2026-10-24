@@ -14,16 +14,15 @@
 | P1-3 | Nacos @RefreshScope 动态配置 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-4 | MDC 全链路 TraceId 埋点 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-5 | 前端动态菜单 + v-permission | 中 | ✅ **已完成** | 依赖 P0-3 | 2026-10-24 | 2026-10-24 |
-| P2-1 | 收尾 README / 接口文档 / SQL | 低 | ⏳ **待开始** | 依赖全部 P0 + P1 | — | — |
+| P2-1 | 收尾 README / 接口文档 / SQL | 低 | ✅ **已完成** | 依赖全部 P0 + P1 | 2026-10-24 | 2026-10-24 |
 
 ---
 
 ## 当前状态摘要
 
-- **当前阶段**：P1-5 前端动态菜单 + v-permission **已完成**
-- **下一待执行阶段**：P2-1 收尾 README / 接口文档 / SQL 汇总（依赖全部 P0+P1 已就绪）
-- **最近一次变更**：P1-5 —— 后端新增 `sys_menu` + `sys_role_menu` 表 + `MenuController GET /api/user/menu`（按 role 联查菜单树 + 权限码数组）；前端新增 `directive/permission.js`（v-permission 指令），Login 成功后拉取菜单/权限存 localStorage，Home.vue 侧边栏改数据驱动（失败兜底静态菜单），request.js 加 X-Trace-Id 请求头 + clearAuth 清理缓存，BookingAdmin 审批按钮挂 v-permission；后端 mvn compile exit 0，前端 npm run build exit 0
-- **方案修正**：原计划"router.addRoute 动态路由 + pinia store"→ 修正为保留现有静态路由表 + meta.role 守卫（已在工作，重写风险大），菜单/权限数据存 localStorage（项目无 pinia，不引入新依赖）；菜单 path 预置数据按前端实际路由（/home/*）对齐
+- **当前阶段**：P2-1 收尾 README / 接口文档 / SQL **已完成** —— 全部 10 个阶段交付完毕
+- **下一待执行阶段**：无（路线图全部完成，等待运行时冒烟验收 / git 提交指令）
+- **最近一次变更**：P2-1 —— README 对齐 P0-P1 全部能力（16 项核心能力 + 批量接口/菜单接口清单 + Outbox 亮点改写 + 双粒度锁 + JDK 21 编译提示）；新增 `docs/seed.sql`（BCrypt 真实 hash 由 spring-security-crypto 本地生成，密码 123456）；修复 schema.sql sys_user 列名 `nickname`→`real_name` 与实体不一致 bug；schema.sql 补 sys_user 预置账号；核对 schema.sql 含 12 张表 CREATE
 - **环境修正**：当前机器 Maven 默认 JDK 1.8 编译失败（项目用 Java 16+ pattern matching），须 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 后 `mvn compile`
 - **索引现状**：`idx_booking_room_time` / `idx_booking_user_status` / `idx_oplog_create_time` 基线 schema 已存在，P1-1 只需补 `deleted` 列（增量 ALTER 已写入 schema.sql 末尾注释段）
 
