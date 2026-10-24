@@ -98,15 +98,23 @@
 
 ## 阶段 P0-4｜幂等拦截器 RequestId 防重复提交 验收清单
 
-### 变更：新增 IdempotentInterceptor + Redis SETNX
-- [ ] 新增 `IdempotentInterceptor.java`：从 Header 取 `X-Request-Id` → Redis SETNX `idempotent:{userId}:{requestId}`（TTL=60s）
-- [ ] SETNX 返回 false → 返回 400 "请勿重复提交"
-- [ ] WebConfig 注册拦截器，匹配路径：`/api/booking/submit`、`/api/booking/approve`、`/api/booking/cancel/**`、`/api/room/delete/**`、`/api/user/resetPassword`
-- [ ] 其他只读接口不拦截（GET /api/room/list 等）
-- [ ] 前端 60s 内带相同 X-Request-Id 重放 submit 请求 → 400 幂等拦截
-- [ ] 前端不同 X-Request-Id 正常提交（幂等放行）
-- [ ] Redis 不可达时拦截器降级（只打印 warn，不阻断请求主流程）
-- [ ] 编译通过
+### ⚠️ 方案修正（与原计划差异）
+- ~~前端必须带 X-Request-Id~~ → **可选** Header，不存在则跳过（降级模式）
+- ~~StringRedisTemplate~~ → **Redisson RBucket**（trySet = SETNX+TTL，技术栈一致）
+- Redis 不可达 → **warn + 放行**（幂等是增强不是安全屏障）
+
+### 变更：新增 IdempotentInterceptor + Redisson SETNX
+- [x] 新增 `IdempotentInterceptor.java`：preHandle 取 userId（TokenInterceptor 已写入 request）→ 取 X-Request-Id Header（可选）→ `Redisson RBucket.trySet(key="idempotent:{userId}:{requestId}", "1", 60s)`
+- [x] trySet 返回 false（key 已存在）→ 返回 400 "请勿重复提交"
+- [x] WebConfig 注册顺序：TokenInterceptor 先 → IdempotentInterceptor 后（前者写 userId，后者读取）
+- [x] 匹配路径（11 条写操作）：booking/submit、booking/approve、booking/cancel/**、room/add、room/update、room/delete/**、room/enable/**、room/disable/**、user/role、user/status、user/resetPassword
+- [ ] GET 只读接口不拦截（room/list、booking/user/page 等）
+- [ ] 登录/注册接口不受影响（不在匹配列表）
+- [ ] 不带 X-Request-Id 的写请求 → 200 正常（降级跳过）
+- [ ] 带相同 X-Request-Id 重放 → 第一次 200，第二次 400
+- [ ] 60s 后相同 X-Request-Id → 200 正常（TTL 过期）
+- [ ] Redis 不可达时 → log.warn + 放行（不阻断主业务）
+- [x] 编译通过：`mvn -q compile`（exit_code=0）
 - [ ] 全量冒烟回归：20 步全部通过
 
 ---

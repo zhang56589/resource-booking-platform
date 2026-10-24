@@ -49,10 +49,12 @@
 - **实现要点**：PermissionAspect 在 TokenInterceptor preHandle 之后执行 → roleId 已写入 request → 查 sys_role_permission JOIN sys_permission → 匹配权限码；SysRole.id 与 SysUser.role 对齐（0=employee, 1=admin），后续扩展 auditor(2) 只需 INSERT 新角色 + 映射
 - **Mapper XML**：SysRolePermissionMapper 自定义 `selectPermissionCodesByRoleId`（INNER JOIN sys_permission）
 
-### P0-4｜幂等拦截器 RequestId 防重复提交（高优）
-- **目标**：新增 `IdempotentInterceptor` + Redis SETNX（key=`idempotent:{userId}:{requestId}`, TTL=60s）。前端请求头带 `X-Request-Id`（uuid 每次生成），Redis 去重；已存在则返回 400 "请勿重复提交"。覆盖 submitBooking / approve / cancelBooking / deleteRoom
-- **影响文件**：新增 `IdempotentInterceptor`、`WebConfig` 注册拦截器、DTO 可选加 requestId 字段或从 Header 取
-- **依赖**：无
+### P0-4｜幂等拦截器 RequestId 防重复提交（高优）✅ **已完成 2026-10-24**
+- **目标**：新增 `IdempotentInterceptor` + Redisson SETNX（key=`idempotent:{userId}:{requestId}`, TTL=60s）。`X-Request-Id` Header **可选**，存在则校验，不存在则跳过（降级模式）；Redis 不可达 → warn + 放行
+- **影响文件**：新增 `IdempotentInterceptor`（Redisson RBucket.trySet 实现 SETNX）、`WebConfig`（在 TokenInterceptor 之后注册，只匹配 11 条写操作路径）
+- **依赖**：无（Redisson starter 已在）
+- **实现要点**：拦截器注册顺序 = TokenInterceptor 先 → IdempotentInterceptor 后（前者写 userId 到 request，后者读取）；匹配列表只覆盖 POST/PUT/DELETE 写操作，GET 只读接口不受影响；Redis 异常降级放行（幂等是增强不是安全屏障）
+- **方案修正**：原 ROADMAP 写"前端必须带 X-Request-Id"→ 修正为可选 Header；原计划 StringRedisTemplate → 实际用 Redisson RBucket（保持与项目现有分布式锁技术栈一致）
 
 ### P1-1｜数据库索引优化 + 软删除改造（中优）
 - **目标**：① meeting_booking 表加复合索引 (room_id, start_time, end_time) + (user_id, res_status)；② meeting_room / meeting_booking 加 deleted tinyint(1) DEFAULT 0 软删除 + MyBatis-Plus `@TableLogic`；③ operation_log 加索引 (create_time)
