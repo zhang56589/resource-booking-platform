@@ -1,8 +1,9 @@
 package com.example.adminsystem.util;
 
 import com.example.adminsystem.config.JwtProperties;
-import io.jsonwebtoken.*;
-import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
@@ -15,13 +16,15 @@ import java.util.Map;
 public class JwtUtil {
 
     @Resource
+    private SecretKey jwtSecretKey;
+
+    @Resource
     private JwtProperties jwtProperties;
 
     /**
      * 生成token
      */
     public String generateToken(Long userId, String username, Integer role) {
-        SecretKey key = Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes());
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("username", username);
@@ -30,7 +33,7 @@ public class JwtUtil {
         return Jwts.builder()
                 .claims(claims)
                 .expiration(new Date(System.currentTimeMillis() + jwtProperties.getExpiration()))
-                .signWith(key)
+                .signWith(jwtSecretKey)
                 .compact();
     }
 
@@ -38,11 +41,14 @@ public class JwtUtil {
      * 解析token，获取Claims
      */
     public Claims parseToken(String token) {
-        SecretKey key = Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes());
-        return Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+        try {
+            return Jwts.parser()
+                    .verifyWith(jwtSecretKey)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+        } catch (JwtException e) {
+            throw new BusinessException(401, "token无效或已过期");
+        }
     }
 }

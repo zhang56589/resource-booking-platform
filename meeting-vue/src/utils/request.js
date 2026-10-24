@@ -33,13 +33,11 @@ function redirectToLogin(msg) {
   }, 800)
 }
 
-// 请求拦截器：自动携带 token
-// 说明：后端 TokenInterceptor 从请求头 token 读取；同时附带 Authorization 以兼容通用规范
+// 请求拦截器：自动携带 Authorization: Bearer <token>
 request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
     if (token) {
-      config.headers.token = token
       config.headers.Authorization = `Bearer ${token}`
     }
     return config

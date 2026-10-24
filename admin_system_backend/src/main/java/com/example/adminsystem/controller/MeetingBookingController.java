@@ -5,37 +5,100 @@ import com.example.adminsystem.annotation.RequireAdmin;
 import com.example.adminsystem.dto.ApproveBookingDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
+import com.example.adminsystem.enums.UserRoleEnum;
 import com.example.adminsystem.service.MeetingBookingService;
 import com.example.adminsystem.util.Result;
 import com.example.adminsystem.vo.BookingVO;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 预约相关 Controller。
+ *
+ * ======== 分布式锁与事务边界 ========
+ * Redisson 分布式锁在 Controller 层持有，Service 的 @Transactional 方法在锁内执行（锁包事务）。
+ *   Controller tryLock → Service @Transactional → 事务提交 → Controller finally unlock。
+ *   事务提交在锁释放之前，避免并发请求读到上一个事务的未提交数据。
+ *
+ * cancelBooking 不走分布式锁：DB FOR UPDATE 行锁 + 业务前置校验已足够。
+ * approve 走分布式锁：审批会改变时段可用性，多实例并发审批会产生时间重叠。
+ */
+@Slf4j
 @RestController
 @RequestMapping("/api/booking")
 public class MeetingBookingController {
 
+    /** ====== 分布式锁配置 ====== */
+    private static final String LOCK_KEY_PREFIX = "booking:room:";
+    private static final long LOCK_WAIT_SECONDS = 5L;
+    private static final long LOCK_LEASE_TIME = -1L; // Redisson watch dog 自动续期
+
+    /** ====== 统一业务提示（#4 魔法字符串收敛） ====== */
+    private static final String MSG_UNAUTHORIZED = "未登录，请携带token";
+
     @Resource
     private MeetingBookingService meetingBookingService;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     /**
-     * 员工提交预约
+     * #3 统一从 request 属性里取 userId，null 安全。
      */
-    @PostMapping("/submit")
-    public Result<?> submit(@Valid @RequestBody BookingDTO dto, HttpServletRequest request){
-        Object userIdObj = request.getAttribute("userId");
-        if(userIdObj == null){
-            return Result.fail(401,"未登录，请携带token");
-        }
-        Long userId = Long.parseLong(userIdObj.toString());
-        return meetingBookingService.submitBooking(userId, dto);
+    private Long requireUserId(HttpServletRequest request) {
+        Object idObj = request.getAttribute("userId");
+        return idObj == null ? null : Long.parseLong(idObj.toString());
     }
 
     /**
-     * 管理员：分页查询全部预约（支持会议室、状态、时间段筛选）
+     * #3 同时要求已登录 + 具备管理员角色。
+     * 注意：和 @RequireAdmin 注解形成双重保险，防止漏注解的场景。
      */
+    private Long requireAdminId(HttpServletRequest request) {
+        Long userId = requireUserId(request);
+        if (userId == null) return null;
+        Object roleObj = request.getAttribute("role");
+        if (!UserRoleEnum.ADMIN.getCode().equals(roleObj)) return null;
+        return userId;
+    }
+
+    @PostMapping("/submit")
+    public Result<?> submit(@Valid @RequestBody BookingDTO dto, HttpServletRequest request) {
+        Long userId = requireUserId(request);
+        if (userId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
+        }
+
+        // ====== 分布式锁（锁包事务） ======
+        String lockKey = LOCK_KEY_PREFIX + dto.getRoomId();
+        RLock rLock = redissonClient.getLock(lockKey);
+        boolean locked = false;
+        try {
+            locked = rLock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_TIME, TimeUnit.SECONDS);
+            if (!locked) {
+                log.info("预约提交抢锁失败 lockKey={}, userId={}", lockKey, userId);
+                return Result.fail(Result.BAD_REQUEST, "该会议室正在被他人预约，请稍后重试");
+            }
+            meetingBookingService.submitBooking(userId, dto);
+            return Result.success("预约提交成功，等待管理员审批");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("预约提交线程被中断 lockKey={}", lockKey, e);
+            return Result.fail(Result.BAD_REQUEST, "操作被中断，请稍后重试");
+        } finally {
+            if (locked && rLock.isHeldByCurrentThread()) {
+                rLock.unlock();
+            }
+        }
+    }
+
     @RequireAdmin
     @GetMapping("/admin/page")
     public Result<Page<BookingVO>> adminPage(@RequestParam Integer pageNum,
@@ -44,74 +107,81 @@ public class MeetingBookingController {
         return Result.success(meetingBookingService.adminPage(pageNum, pageSize, dto));
     }
 
-    /**
-     * 员工：查询自己的预约记录（支持会议室、状态、时间段筛选）
-     */
     @GetMapping("/user/page")
     public Result<Page<BookingVO>> userPage(@RequestParam Integer pageNum,
                                             @RequestParam Integer pageSize,
                                             BookingQueryDTO dto,
                                             HttpServletRequest request) {
-        Object userIdObj = request.getAttribute("userId");
-        if(userIdObj == null){
-            return Result.fail(401,"未登录，请携带token");
+        Long userId = requireUserId(request);
+        if (userId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }
-        Long userId = Long.parseLong(userIdObj.toString());
         return Result.success(meetingBookingService.userPage(pageNum, pageSize, userId, dto));
     }
 
-    /**
-     * 管理员审批预约：通过/驳回
-     */
     @RequireAdmin(message = "无权限，仅管理员可以执行审批操作")
     @PostMapping("/approve")
     public Result<?> approve(@Valid @RequestBody ApproveBookingDTO dto,
                              HttpServletRequest request) {
-        Object userIdObj = request.getAttribute("userId");
-        if(userIdObj == null){
-            return Result.fail(401,"未登录，请携带token");
+        Long adminId = requireAdminId(request);
+        if (adminId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }
-        Long adminId = Long.parseLong(userIdObj.toString());
-        return meetingBookingService.approve(dto, adminId);
+
+        Long roomId = meetingBookingService.getRoomIdOfBooking(dto.getBookingId());
+        if (roomId == null) {
+            return Result.fail(Result.BAD_REQUEST, "预约记录不存在");
+        }
+
+        String lockKey = LOCK_KEY_PREFIX + roomId;
+        RLock rLock = redissonClient.getLock(lockKey);
+        boolean locked = false;
+        try {
+            locked = rLock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_TIME, TimeUnit.SECONDS);
+            if (!locked) {
+                log.info("预约审批抢锁失败 lockKey={}, adminId={}", lockKey, adminId);
+                return Result.fail(Result.BAD_REQUEST, "该会议室正在处理其他预约，请稍后重试");
+            }
+            meetingBookingService.approve(dto, adminId);
+            return Result.success("审批完成");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("预约审批线程被中断 lockKey={}", lockKey, e);
+            return Result.fail(Result.BAD_REQUEST, "操作被中断，请稍后重试");
+        } finally {
+            if (locked && rLock.isHeldByCurrentThread()) {
+                rLock.unlock();
+            }
+        }
     }
 
-    /**
-     * 员工取消预约，仅待审批可取消
-     */
     @DeleteMapping("/cancel/{id}")
-    public Result<?> cancel(@PathVariable Long id, HttpServletRequest request){
-        Object userIdObj = request.getAttribute("userId");
-        if(userIdObj == null){
-            return Result.fail(401,"未登录");
+    public Result<?> cancel(@PathVariable Long id, HttpServletRequest request) {
+        Long userId = requireUserId(request);
+        if (userId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }
-        Long userId = Long.parseLong(userIdObj.toString());
-        return meetingBookingService.cancelBooking(id, userId);
+        meetingBookingService.cancelBooking(id, userId);
+        return Result.success("取消预约成功");
     }
 
-    /**
-     * 管理员：多条件筛选分页查询预约
-     */
     @RequireAdmin
     @GetMapping("/admin/query")
     public Result<Page<BookingVO>> adminQuery(@RequestParam Integer pageNum,
                                               @RequestParam Integer pageSize,
-                                              BookingQueryDTO dto){
+                                              BookingQueryDTO dto) {
         return Result.success(meetingBookingService.queryPage(pageNum, pageSize, dto));
     }
 
-    /**
-     * 员工：本人预约带条件筛选
-     */
     @GetMapping("/user/query")
     public Result<Page<BookingVO>> userQuery(@RequestParam Integer pageNum,
                                              @RequestParam Integer pageSize,
                                              BookingQueryDTO dto,
-                                             HttpServletRequest request){
-        Object userIdObj = request.getAttribute("userId");
-        if(userIdObj == null){
-            return Result.fail(401,"未登录，请携带token");
+                                             HttpServletRequest request) {
+        Long userId = requireUserId(request);
+        if (userId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }
-        Long userId = Long.parseLong(userIdObj.toString());
         return Result.success(meetingBookingService.userQueryPage(pageNum, pageSize, dto, userId));
     }
 }

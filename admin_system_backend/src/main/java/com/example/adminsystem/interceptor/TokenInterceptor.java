@@ -10,6 +10,8 @@ import io.jsonwebtoken.Claims;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
@@ -17,8 +19,26 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.nio.charset.StandardCharsets;
 
+/**
+ * ====== 稳定模块：TokenInterceptor 不允许擅自修改核心鉴权逻辑 ======
+ * 本轮只做 P2-6 级别的魔法常量清理，不改业务判断分支：
+ *   - "Authorization" → HttpHeaders.AUTHORIZATION
+ *   - "Bearer "      → 私有常量 BEARER_PREFIX + LENGTH
+ *
+ * 鉴权核心流程：
+ *   1. 放行 OPTIONS（CORS 预检）
+ *   2. 读 Header Authorization，缺失/格式错 → 401
+ *   3. JwtUtil.parseToken → 捕获 JwtException / 签名不匹配 / 过期 → 401
+ *   4. claims.get(userId / role / username) → 写 request.setAttribute
+ *   5. checkAdmin：读取 @RequireAdmin / @RequireRole → 校验 role → 失败 403
+ */
+@Slf4j
 @Component
 public class TokenInterceptor implements HandlerInterceptor {
+
+    /** P2-6：魔法常量集中声明，避免散落 "Bearer " 子串 */
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final int BEARER_PREFIX_LENGTH = BEARER_PREFIX.length();
 
     @Resource
     private JwtUtil jwtUtil;
@@ -30,22 +50,22 @@ public class TokenInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response,
                              Object handler) throws Exception {
-        System.out.println("进入TokenInterceptor，uri=" + request.getRequestURI() + " method=" + request.getMethod());
+        String uri = request.getRequestURI();
+        log.debug("拦截请求 uri={}, method={}", uri, request.getMethod());
 
         if ("OPTIONS".equals(request.getMethod())) {
             return true;
         }
 
-        //登录注册放行
-        if(request.getRequestURI().contains("/api/login") || request.getRequestURI().contains("/api/register")){
-            System.out.println("放行登录/注册接口");
-            return true;
+        // ====== P2-6：HttpHeaders 常量 + Bearer 常量 ======
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
+            writeFail(response, 401, "未登录，请携带token");
+            return false;
         }
+        String token = authHeader.substring(BEARER_PREFIX_LENGTH);
 
-        String token = request.getHeader("token");
-        System.out.println("获取token=" + token);
-
-        if(token == null || token.isBlank()){
+        if (token.isBlank()) {
             writeFail(response, 401, "未登录，请携带token");
             return false;
         }
@@ -54,23 +74,20 @@ public class TokenInterceptor implements HandlerInterceptor {
             Claims claims = jwtUtil.parseToken(token);
             Object userIdObj = claims.get("userId");
             Object roleObj = claims.get("role");
-            // username 用于操作日志记录操作人
             Object usernameObj = claims.get("username");
 
-            if(userIdObj == null || roleObj == null){
-                System.out.println("token内userId/role为空");
+            if (userIdObj == null || roleObj == null) {
+                log.debug("token内userId/role为空");
                 writeFail(response, 401, "token无效");
                 return false;
             }
-            //存入 Long / Integer / String，不存字符串化的原类型
             request.setAttribute("userId", Long.valueOf(userIdObj.toString()));
             request.setAttribute("role", Integer.valueOf(roleObj.toString()));
-            if(usernameObj != null){
+            if (usernameObj != null) {
                 request.setAttribute("username", usernameObj.toString());
             }
-        }catch (Exception e){
-            System.out.println("token解析异常");
-            e.printStackTrace();
+        } catch (Exception e) {
+            log.error("token解析异常 uri={}", uri, e);
             writeFail(response, 401, "token无效或已过期");
             return false;
         }

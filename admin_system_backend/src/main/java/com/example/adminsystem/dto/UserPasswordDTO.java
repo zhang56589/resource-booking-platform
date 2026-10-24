@@ -1,12 +1,14 @@
 package com.example.adminsystem.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
 public class UserPasswordDTO {
-    /** 用户id */
+    @NotNull(message = "用户id不能为空")
     private Long id;
 
-    /** 新密码（明文，后端BCrypt加密后入库） */
+    @NotBlank(message = "新密码不能为空")
     private String password;
 }

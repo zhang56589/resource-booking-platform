@@ -10,6 +10,10 @@ spring:
     username: root
     password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
+    # H-4: 显式声明隔离级别为 REPEATABLE READ（MySQL 默认值）
+    # 与 Redisson 分布式锁 + FOR UPDATE 行锁双重悲观锁叠加，幻读可接受
+    hikari:
+      transaction-isolation: TRANSACTION_REPEATABLE_READ
 
   # Redisson 分布式锁自动装配读取此配置；单机 Redis 足够
   data:
