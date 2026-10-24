@@ -28,15 +28,22 @@ import java.util.concurrent.TimeUnit;
  *   事务提交在锁释放之前，避免并发请求读到上一个事务的未提交数据。
  *
  * cancelBooking 不走分布式锁：DB FOR UPDATE 行锁 + 业务前置校验已足够。
- * approve 走分布式锁：审批会改变时段可用性，多实例并发审批会产生时间重叠。
+ *
+ * ======== 锁粒度说明 ========
+ *   submitBooking —— 会议室粒度（booking:room:{roomId}）：串行化同房间所有时段的并发提交请求，防止同时段冲突。
+ *   approve       —— 预约单粒度（booking:approve:{bookingId}）：串行化同一个 bookingId 的并发审批请求；
+ *                     不同 bookingId 但同房间的审批不再互斥，DB FOR UPDATE 行锁 + PENDING 状态校验兜底。
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/booking")
 public class MeetingBookingController {
 
-    /** ====== 分布式锁配置 ====== */
-    private static final String LOCK_KEY_PREFIX = "booking:room:";
+    /** ====== 分布式锁配置（P0-1：submit 保持会议室粒度，approve 改为预约单粒度） ====== */
+    /** submitBooking 锁：会议室粒度，串行化同房间所有时段的预约提交请求 */
+    private static final String LOCK_KEY_ROOM = "booking:room:";
+    /** approve 锁：预约单粒度，串行化同一个 bookingId 的并发审批请求 */
+    private static final String LOCK_KEY_APPROVE = "booking:approve:";
     private static final long LOCK_WAIT_SECONDS = 5L;
     private static final long LOCK_LEASE_TIME = -1L; // Redisson watch dog 自动续期
 
@@ -77,7 +84,7 @@ public class MeetingBookingController {
         }
 
         // ====== 分布式锁（锁包事务） ======
-        String lockKey = LOCK_KEY_PREFIX + dto.getRoomId();
+        String lockKey = LOCK_KEY_ROOM + dto.getRoomId();
         RLock rLock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {
@@ -128,19 +135,17 @@ public class MeetingBookingController {
             return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }
 
-        Long roomId = meetingBookingService.getRoomIdOfBooking(dto.getBookingId());
-        if (roomId == null) {
-            return Result.fail(Result.BAD_REQUEST, "预约记录不存在");
-        }
-
-        String lockKey = LOCK_KEY_PREFIX + roomId;
+        // ====== 分布式锁（P0-1：approve 锁粒度改为预约单粒度 bookingId） ======
+        // 同一 bookingId 的并发审批请求会被 Redisson 串行化；
+        // 不同 bookingId 但同房间的审批不再互斥，Service 内 FOR UPDATE + PENDING 状态校验兜底。
+        String lockKey = LOCK_KEY_APPROVE + dto.getBookingId();
         RLock rLock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {
             locked = rLock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_TIME, TimeUnit.SECONDS);
             if (!locked) {
                 log.info("预约审批抢锁失败 lockKey={}, adminId={}", lockKey, adminId);
-                return Result.fail(Result.BAD_REQUEST, "该会议室正在处理其他预约，请稍后重试");
+                return Result.fail(Result.BAD_REQUEST, "该预约正在被其他人处理，请稍后重试");
             }
             meetingBookingService.approve(dto, adminId);
             return Result.success("审批完成");

@@ -29,7 +29,7 @@
 
 ## 阶段序列（依赖顺序：P0 → P1 → P2，强依赖阶段必须按序执行）
 
-### P0-1｜锁粒度拆分优化（高优）
+### P0-1｜锁粒度拆分优化（高优）✅ **已完成 2026-10-24**
 - **目标**：approve 改为预约单粒度锁（booking:id:{bookingId}），submit 保持会议室粒度（booking:room:{roomId}）。理由：approve 是对已存在 booking 单的状态变更，只需要串行化**同一个 bookingId** 的并发审批请求，不需要把整个会议室锁死；submit 仍然需要会议室粒度锁防止同时段冲突
 - **影响文件**：`MeetingBookingController.java`（approve 方法锁 key 改 bookingId）、`MeetingBookingServiceImpl.java`（新增注释说明两种锁粒度）
 - **依赖**：无
