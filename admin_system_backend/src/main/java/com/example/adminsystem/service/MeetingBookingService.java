@@ -3,6 +3,7 @@ package com.example.adminsystem.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.adminsystem.dto.ApproveBookingDTO;
+import com.example.adminsystem.dto.BookingBatchApproveDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
 import com.example.adminsystem.entity.MeetingBooking;
@@ -13,6 +14,12 @@ public interface MeetingBookingService extends IService<MeetingBooking> {
     void submitBooking(Long userId, BookingDTO dto);
 
     void approve(ApproveBookingDTO dto, Long adminId);
+
+    /**
+     * 批量审批：一个事务内循环调单次 approve 逻辑，任一失败整体回滚。
+     * 错误信息带第一个失败的 bookingId 和原因。
+     */
+    void batchApprove(BookingBatchApproveDTO dto, Long adminId);
 
     /**管理员：查询全部预约分页 返回VO*/
     Page<BookingVO> adminPage(Integer pageNum, Integer pageSize, BookingQueryDTO dto);

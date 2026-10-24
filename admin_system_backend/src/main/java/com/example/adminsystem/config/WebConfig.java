@@ -34,12 +34,16 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns(
                         "/api/booking/submit",
                         "/api/booking/approve",
+                        "/api/booking/batch-approve",
                         "/api/booking/cancel/**",
                         "/api/room/add",
                         "/api/room/update",
                         "/api/room/delete/**",
                         "/api/room/enable/**",
                         "/api/room/disable/**",
+                        "/api/room/batch-enable",
+                        "/api/room/batch-disable",
+                        "/api/room/batch-delete",
                         "/api/user/role",
                         "/api/user/status",
                         "/api/user/resetPassword"

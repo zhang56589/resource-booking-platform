@@ -3,6 +3,8 @@ package com.example.adminsystem.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.adminsystem.annotation.RequireAdmin;
+import com.example.adminsystem.annotation.RequiresPermission;
+import com.example.adminsystem.dto.RoomBatchDTO;
 import com.example.adminsystem.dto.RoomDTO;
 import com.example.adminsystem.entity.MeetingRoom;
 import com.example.adminsystem.enums.RoomStatusEnum;
@@ -86,5 +88,31 @@ public class MeetingRoomController {
     public Result<String> disable(@PathVariable Long id) {
         meetingRoomService.disableRoom(id);
         return Result.success("禁用成功");
+    }
+
+    // ===================== 批量操作（P1-2）：一个事务内全部成功或整体回滚 =====================
+
+    @RequireAdmin
+    @RequiresPermission("room:write")
+    @PutMapping("/batch-enable")
+    public Result<String> batchEnable(@Valid @RequestBody RoomBatchDTO dto) {
+        meetingRoomService.batchEnable(dto);
+        return Result.success("批量启用成功");
+    }
+
+    @RequireAdmin
+    @RequiresPermission("room:write")
+    @PutMapping("/batch-disable")
+    public Result<String> batchDisable(@Valid @RequestBody RoomBatchDTO dto) {
+        meetingRoomService.batchDisable(dto);
+        return Result.success("批量禁用成功");
+    }
+
+    @RequireAdmin
+    @RequiresPermission("room:write")
+    @DeleteMapping("/batch-delete")
+    public Result<String> batchDelete(@Valid @RequestBody RoomBatchDTO dto) {
+        meetingRoomService.batchDelete(dto);
+        return Result.success("批量删除成功");
     }
 }

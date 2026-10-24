@@ -63,10 +63,11 @@
 - **实施摘要**：索引（idx_booking_room_time / idx_booking_user_status / idx_oplog_create_time）基线 schema.sql 已存在，无需新增；本阶段只补 `meeting_room.deleted` + `meeting_booking.deleted` 两列 + `@TableLogic`；手写 SQL 共 6 处追加 `deleted=0`（2 处 selectByIdForUpdate + 4 处 XML JOIN）；B-6 已修复
 - **环境注意**：本机 Maven 默认 JDK 1.8 不支持 pattern matching，须先 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`
 
-### P1-2｜批量审批、会议室批量启停接口（中优）
+### P1-2｜批量审批、会议室批量启停接口（中优）✅ **已完成 2026-10-24**
 - **目标**：新增 `POST /api/booking/batch-approve`（入参 bookingIds: List<Long>, status, rejectReason）、`PUT /api/room/batch-enable` + `PUT /api/room/batch-disable`（入参 ids: List<Long>）。批量操作在一个事务里，每个元素复用单次的业务校验逻辑（通过 Service 循环调用，不直接 foreach updateById 跳过校验）
 - **影响文件**：Controller 新增方法 + DTO + Service 新增批量方法（复用单次校验）
 - **依赖**：无
+- **实施摘要**：新增 `BookingBatchApproveDTO` / `RoomBatchDTO`；批量审批锁粒度与单次 approve 一致（`booking:approve:{bookingId}`），Service 循环内逐元素 tryLock/unlock（不同时持多锁，无死锁）；会议室批量操作复用单次 enable/disable/delete 全部校验（含未完结预约拦截）；Controller 加 `@RequireAdmin` + `@RequiresPermission` 双层校验；幂等拦截器追加 4 条批量路径
 
 ### P1-3｜Nacos @RefreshScope 动态配置抽离（中优）
 - **目标**：把 application.yml 里的 `jwt.secretKey` / `jwt.expireMinutes` / `redisson.*` / `rocketmq.*` 抽到 Nacos 配置中心（dataId=admin-system-backend.yaml, group=DEFAULT_GROUP）。配置类加 `@RefreshScope` 热刷新

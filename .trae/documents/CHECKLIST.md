@@ -138,14 +138,17 @@
 ## 阶段 P1-2｜批量审批、会议室批量启停接口 验收清单
 
 ### 变更：新增 batch-approve / batch-enable / batch-disable / batch-delete
-- [ ] `POST /api/booking/batch-approve`：入参 BookingBatchApproveDTO(bookingIds: List<Long>, status, rejectReason)
-- [ ] `PUT /api/room/batch-enable`：入参 RoomBatchDTO(ids: List<Long>)
-- [ ] `PUT /api/room/batch-disable`：同上
-- [ ] `DELETE /api/room/batch-delete`：同上（批量删除复用单次前置校验：未完结预约拦截）
-- [ ] 批量在一个事务里：每个元素循环调 Service 的单次方法（复用业务校验），任意一个失败整体回滚
-- [ ] 批量空数组 → 400 "ids 不能为空"
-- [ ] 批量内遇到第一个失败元素（如某个 bookingId 不存在）→ BusinessException → 事务回滚 → 400 返回
-- [ ] 编译通过
+- [x] `POST /api/booking/batch-approve`：入参 BookingBatchApproveDTO(bookingIds: List<Long>, status, rejectReason) —— `MeetingBookingController.batchApprove`
+- [x] `PUT /api/room/batch-enable`：入参 RoomBatchDTO(ids: List<Long>) —— `MeetingRoomController.batchEnable`
+- [x] `PUT /api/room/batch-disable`：同上 —— `MeetingRoomController.batchDisable`
+- [x] `DELETE /api/room/batch-delete`：同上（批量删除复用单次前置校验：未完结预约拦截） —— `MeetingRoomController.batchDelete`
+- [x] 批量在一个事务里：每个元素循环调 Service 的单次方法（复用业务校验），任意一个失败整体回滚（`@Transactional(rollbackFor=Exception.class)` + 循环内 try/catch 包装 BusinessException）
+- [x] 批量空数组 → 400 "ids 不能为空"（DTO `@NotEmpty`）
+- [x] 批量内遇到第一个失败元素（如某个 bookingId 不存在）→ BusinessException → 事务回滚 → 400 返回（错误信息带 bookingId + 原因）
+- [x] 批量审批锁粒度与单次 approve 一致（`booking:approve:{bookingId}`），Service 循环内逐元素 tryLock/unlock
+- [x] Controller 双层校验：`@RequireAdmin` + `@RequiresPermission("booking:approve" / "room:write")`
+- [x] WebConfig 幂等拦截器追加 4 条批量路径
+- [x] 编译通过：`mvn -q compile` exit_code=0（需 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`）
 - [ ] 全量冒烟回归：20 步全部通过
 - [ ] 新增接口单独用例：① 批量 5 个 booking 同时审批通过 → 200 + DB 5 条 status=1；② 批量中混 1 个已审批 booking → 整体 400 + DB 不变
 

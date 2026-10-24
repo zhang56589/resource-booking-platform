@@ -2,7 +2,9 @@ package com.example.adminsystem.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.adminsystem.annotation.RequireAdmin;
+import com.example.adminsystem.annotation.RequiresPermission;
 import com.example.adminsystem.dto.ApproveBookingDTO;
+import com.example.adminsystem.dto.BookingBatchApproveDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
 import com.example.adminsystem.service.MeetingBookingService;
@@ -156,6 +158,23 @@ public class MeetingBookingController {
         }
         meetingBookingService.cancelBooking(id, userId);
         return Result.success("取消预约成功");
+    }
+
+    /**
+     * P1-2 批量审批：锁在 Service 循环内逐元素持有（booking:approve:{bookingId}），
+     * 一个事务内全部成功或整体回滚，错误信息带第一个失败的 bookingId 和原因。
+     */
+    @RequireAdmin(message = "无权限，仅管理员可以执行审批操作")
+    @RequiresPermission("booking:approve")
+    @PostMapping("/batch-approve")
+    public Result<?> batchApprove(@Valid @RequestBody BookingBatchApproveDTO dto,
+                                  HttpServletRequest request) {
+        Long adminId = requireUserId(request);
+        if (adminId == null) {
+            return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
+        }
+        meetingBookingService.batchApprove(dto, adminId);
+        return Result.success("批量审批完成");
     }
 
     @RequireAdmin

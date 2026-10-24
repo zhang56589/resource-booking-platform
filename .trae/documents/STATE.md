@@ -10,7 +10,7 @@
 | P0-3 | RBAC 细粒度权限改造 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-4 | 幂等拦截器 RequestId 防重复提交 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-1 | 数据库索引 + 软删除 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
-| P1-2 | 批量审批、批量启停接口 | 中 | ⏳ **待开始** | — | — | — |
+| P1-2 | 批量审批、批量启停接口 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-3 | Nacos @RefreshScope 动态配置 | 中 | ⏳ **待开始** | — | — | — |
 | P1-4 | MDC 全链路 TraceId 埋点 | 中 | ⏳ **待开始** | — | — | — |
 | P1-5 | 前端动态菜单 + v-permission | 中 | ⏳ **待开始** | 依赖 P0-3 | — | — |
@@ -20,9 +20,9 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：P1-1 数据库索引 + 软删除 **已完成**
-- **下一待执行阶段**：P1-2 批量接口 / P1-3 Nacos / P1-4 TraceId / P1-5 前端动态菜单（全独立，任意顺序）
-- **最近一次变更**：P1-1 —— `docs/schema.sql` 追加 `deleted` 列 + P1-1 增量迁移段；`MeetingRoom` / `MeetingBooking` Entity 加 `@TableLogic private Integer deleted`；两处 `selectByIdForUpdate` 手写 SQL 追加 `AND deleted = 0`；`MeetingBookingMapper.xml` 4 处分页 JOIN 追加 `mb.deleted = 0` 且 `LEFT JOIN meeting_room` 加 `AND mr.deleted = 0`；编译 exit_code=0
+- **当前阶段**：P1-2 批量审批、批量启停接口 **已完成**
+- **下一待执行阶段**：P1-3 Nacos / P1-4 TraceId / P1-5 前端动态菜单（全独立，任意顺序）
+- **最近一次变更**：P1-2 —— 新增 `BookingBatchApproveDTO` / `RoomBatchDTO`；`MeetingBookingServiceImpl.batchApprove`（Service 循环内逐元素持 `booking:approve:{bookingId}` Redisson 锁，一个事务，任一失败整体回滚）；`MeetingRoomServiceImpl.batchEnable/batchDisable/batchDelete`（循环复用单次校验，事务原子）；Controller 新增 4 个批量接口（`@RequireAdmin` + `@RequiresPermission`）；WebConfig 幂等拦截器追加 4 条批量路径；编译 exit_code=0
 - **环境修正**：当前机器 Maven 默认 JDK 1.8 编译失败（项目用 Java 16+ pattern matching），须 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 后 `mvn compile`
 - **索引现状**：`idx_booking_room_time` / `idx_booking_user_status` / `idx_oplog_create_time` 基线 schema 已存在，P1-1 只需补 `deleted` 列（增量 ALTER 已写入 schema.sql 末尾注释段）
 
@@ -55,3 +55,4 @@
 | 2026-10-24 | P0-3 RBAC 细粒度权限 `mvn -q compile` | 0 | 零错误零警告；新增 spring-boot-starter-aop 依赖；Mapper XML INNER JOIN sys_permission 正确加载 |
 | 2026-10-24 | P0-4 幂等拦截器 `mvn -q compile` | 0 | 零错误零警告；Redisson RBucket.trySet SETNX 语义正确；WebConfig 拦截器注册顺序 TokenInterceptor→IdempotentInterceptor |
 | 2026-10-24 | P1-1 索引+软删除 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；@TableLogic 生效；手写 SQL 4 处 JOIN + 2 处 FOR UPDATE 均追加 deleted=0 |
+| 2026-10-24 | P1-2 批量接口 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；批量审批锁在 Service 循环内逐元素持有（与单次 approve 同粒度）；幂等拦截器追加 4 条批量路径 |

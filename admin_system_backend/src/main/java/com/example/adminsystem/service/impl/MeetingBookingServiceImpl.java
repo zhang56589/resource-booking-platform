@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.adminsystem.dto.ApproveBookingDTO;
+import com.example.adminsystem.dto.BookingBatchApproveDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
 import com.example.adminsystem.entity.MeetingBooking;
@@ -27,6 +28,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +39,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Service 内职责：
@@ -67,6 +71,14 @@ public class MeetingBookingServiceImpl
     /** P0-2：本地消息表 Service，事务内直接写 outbox（与业务表原子提交） */
     @Resource
     private SysOutboxService outboxService;
+
+    /** P1-2：批量审批在 Service 循环内逐元素持锁（与单次 approve 同粒度 booking:approve:{bookingId}） */
+    @Resource
+    private RedissonClient redissonClient;
+
+    private static final String LOCK_KEY_APPROVE = "booking:approve:";
+    private static final long LOCK_WAIT_SECONDS = 5L;
+    private static final long LOCK_LEASE_TIME = -1L;
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -194,6 +206,47 @@ public class MeetingBookingServiceImpl
         }
 
         log.info("预约审批完成 bookingId={}, result={}, adminId={}", booking.getId(), resultText, adminId);
+    }
+
+    // ===================== batchApprove（P1-2） =====================
+    /**
+     * 批量审批：一个事务内循环复用单次 approve 全部校验（FOR UPDATE 行锁 + PENDING 状态 + 驳回原因 + 时间冲突）。
+     * 任一元素失败抛 BusinessException → 整体回滚，错误信息带第一个失败的 bookingId 和原因。
+     * 每个元素处理时持有与单次 approve 相同粒度的 Redisson 锁（逐元素获取/释放，不会同时持多锁，无死锁）。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchApprove(BookingBatchApproveDTO dto, Long adminId) {
+        for (Long bookingId : dto.getBookingIds()) {
+            String lockKey = LOCK_KEY_APPROVE + bookingId;
+            RLock lock = redissonClient.getLock(lockKey);
+            boolean locked = false;
+            try {
+                locked = lock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_TIME, TimeUnit.SECONDS);
+                if (!locked) {
+                    throw new BusinessException(400,
+                            "批量审批失败：bookingId=" + bookingId + "，原因=该预约正在被其他人处理");
+                }
+                ApproveBookingDTO single = new ApproveBookingDTO();
+                single.setBookingId(bookingId);
+                single.setStatus(dto.getStatus());
+                single.setRejectReason(dto.getRejectReason());
+                try {
+                    approve(single, adminId);
+                } catch (BusinessException e) {
+                    throw new BusinessException(400,
+                            "批量审批失败：bookingId=" + bookingId + "，原因=" + e.getMessage());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new BusinessException(400, "批量审批被中断，请稍后重试");
+            } finally {
+                if (locked && lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
+            }
+        }
+        log.info("批量审批完成 count={}, adminId={}", dto.getBookingIds().size(), adminId);
     }
 
     // ===================== cancelBooking =====================

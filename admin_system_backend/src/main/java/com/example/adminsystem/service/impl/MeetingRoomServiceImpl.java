@@ -3,6 +3,7 @@ package com.example.adminsystem.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.adminsystem.dto.RoomBatchDTO;
 import com.example.adminsystem.dto.RoomDTO;
 import com.example.adminsystem.entity.MeetingBooking;
 import com.example.adminsystem.entity.MeetingRoom;
@@ -15,6 +16,7 @@ import com.example.adminsystem.util.BusinessException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -95,5 +97,46 @@ public class MeetingRoomServiceImpl
             throw new BusinessException(400, "禁用会议室失败");
         }
         log.info("会议室禁用成功 roomId={}", id);
+    }
+
+    // ===================== 批量操作（P1-2）：一个事务内循环复用单次校验，任一失败整体回滚 =====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchEnable(RoomBatchDTO dto) {
+        for (Long id : dto.getIds()) {
+            try {
+                enableRoom(id);
+            } catch (BusinessException e) {
+                throw new BusinessException(400, "批量启用失败：roomId=" + id + "，原因=" + e.getMessage());
+            }
+        }
+        log.info("批量启用会议室完成 count={}", dto.getIds().size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchDisable(RoomBatchDTO dto) {
+        for (Long id : dto.getIds()) {
+            try {
+                disableRoom(id);
+            } catch (BusinessException e) {
+                throw new BusinessException(400, "批量禁用失败：roomId=" + id + "，原因=" + e.getMessage());
+            }
+        }
+        log.info("批量禁用会议室完成 count={}", dto.getIds().size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchDelete(RoomBatchDTO dto) {
+        for (Long id : dto.getIds()) {
+            try {
+                deleteRoom(id);
+            } catch (BusinessException e) {
+                throw new BusinessException(400, "批量删除失败：roomId=" + id + "，原因=" + e.getMessage());
+            }
+        }
+        log.info("批量删除会议室完成 count={}", dto.getIds().size());
     }
 }
