@@ -198,6 +198,48 @@ INSERT INTO `sys_role_permission` (`role_id`, `permission_id`) VALUES
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ========================================================================
+-- P1-5 新增：动态菜单两张表
+--   sys_menu.component 存前端 views 相对路径字符串（如 booking/MyBooking），
+--   前端用 import.meta.glob 动态解析，避免后端硬编码 import 路径
+-- ========================================================================
+DROP TABLE IF EXISTS `sys_role_menu`;
+DROP TABLE IF EXISTS `sys_menu`;
+
+CREATE TABLE `sys_menu` (
+    `id`         INT          NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `parent_id`  INT          NOT NULL DEFAULT 0 COMMENT '父菜单ID，0=顶级',
+    `name`       VARCHAR(64)  NOT NULL COMMENT '菜单名称',
+    `path`       VARCHAR(128) NOT NULL COMMENT '路由路径',
+    `component`  VARCHAR(128) DEFAULT NULL COMMENT '前端组件路径（views 相对，无扩展名）',
+    `icon`       VARCHAR(64)  DEFAULT NULL COMMENT 'Element Plus 图标名',
+    `permission` VARCHAR(64)  DEFAULT NULL COMMENT '关联权限码（如 booking:approve），可空',
+    `order_num`  INT          NOT NULL DEFAULT 0 COMMENT '排序号，升序',
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='动态菜单表';
+
+CREATE TABLE `sys_role_menu` (
+    `role_id` TINYINT NOT NULL COMMENT '外键 sys_role.id',
+    `menu_id` INT     NOT NULL COMMENT '外键 sys_menu.id',
+    PRIMARY KEY (`role_id`, `menu_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色-菜单关联表';
+
+-- 菜单预置数据（path 与前端实际路由对齐）
+INSERT INTO `sys_menu` (`id`, `parent_id`, `name`, `path`, `component`, `icon`, `permission`, `order_num`) VALUES
+    (1, 0, '我的预约',   '/home/my-bookings',    'employee/MyBookings',  'Tickets',        'booking:submit',  1),
+    (2, 0, '会议室列表', '/home/rooms',          'employee/RoomList',    'OfficeBuilding', 'room:list',      2),
+    (3, 0, '预约审批',   '/home/booking-approve','admin/BookingAdmin',   'Tickets',        'booking:approve',3),
+    (4, 0, '会议室管理', '/home/room-manage',    'admin/RoomManage',     'OfficeBuilding', 'room:write',     4),
+    (5, 0, '用户管理',   '/home/users',          'admin/UserManage',     'User',           'user:write',     5),
+    (6, 0, '操作日志',   '/home/logs',           'admin/LogList',        'Document',       'log:page',       6),
+    (7, 0, '工作台',     '/home/dashboard',      'Dashboard',           'Odometer',       NULL,              0),
+    (8, 0, '预约日历',   '/home/calendar',       'RoomCalendar',        'Calendar',       NULL,              1);
+
+-- 员工菜单（工作台 + 预约日历 + 我的预约 + 会议室列表）
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (0, 7), (0, 8), (0, 1), (0, 2);
+-- 管理员菜单（全部）
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 7), (1, 8), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
+
+-- ========================================================================
 -- P1-1 增量迁移（已存在的库执行本段；新库上方 CREATE TABLE 已含全部字段/索引）
 -- ========================================================================
 -- ALTER TABLE `meeting_booking` ADD INDEX `idx_booking_room_time` (`room_id`, `start_time`, `end_time`);

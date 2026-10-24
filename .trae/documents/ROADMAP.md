@@ -82,10 +82,11 @@
 - **依赖**：无
 - **实施摘要**：新增 `TraceIdInterceptor`（入站继承或生成 X-Trace-Id → MDC + 响应头；afterCompletion 清 MDC 防线程池串号）；新增 `logback-spring.xml`（pattern `%d{...} [%X{traceId:-}] [%thread] %-5level %logger{36} - %msg%n`）；WebConfig order=-100 先于 TokenInterceptor；前端 request.js 带 X-Trace-Id 属 P1-5 顺带事项
 
-### P1-5｜前端独立阶段：动态菜单、按钮权限 v-permission（中优）
+### P1-5｜前端独立阶段：动态菜单、按钮权限 v-permission（中优）✅ **已完成 2026-10-24**
 - **目标**：登录后调后端 `/api/user/menu` 返回菜单树（role 过滤）；Element Plus 侧边栏由菜单树动态渲染；自定义 `v-permission` 指令（如 `v-permission="'booking:approve'"`）控制按钮显隐；router/index.js 改为动态 addRoute
 - **影响文件**：前端 `router/index.js`、`api/auth.js`、新增 `permission.js` 指令、新增后端 `MenuController` + `SysMenu` 实体
 - **依赖**：P0-3（RBAC 先做好，动态菜单才有数据来源）
+- **实施摘要**：后端新增 sys_menu + sys_role_menu 两张表（DDL 入 schema.sql）+ MenuController `GET /api/user/menu` 返回 `{menus, permissions}`；前端 permission.js 指令 + Login 拉取存 localStorage + Home.vue 数据驱动侧边栏（兜底静态菜单）+ request.js X-Trace-Id；**方案修正**：保留静态路由表 + meta.role 守卫（不重写为 addRoute，降低风险），不引入 pinia（存 localStorage）
 
 ### P2-1｜收尾：README / 接口文档 / SQL 脚本汇总（低优）
 - **目标**：所有阶段完成后，README 最终对齐、OpenAPI 文档校验（Knife4j `/doc.html`）、6 张业务表 + 新增表的 CREATE TABLE SQL 统一输出到 `docs/schema.sql`

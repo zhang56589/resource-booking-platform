@@ -45,6 +45,7 @@
           </el-select>
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button
+            v-permission="'booking:approve'"
             type="success"
             :loading="uxBatchLoading"
             @click="uxBatchApprove"
@@ -84,8 +85,8 @@
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <template v-if="row.resStatus === 0">
-              <el-button type="success" link @click="handlePass(row)">通过</el-button>
-              <el-button type="danger" link @click="openRejectDialog(row)">
+              <el-button v-permission="'booking:approve'" type="success" link @click="handlePass(row)">通过</el-button>
+              <el-button v-permission="'booking:approve'" type="danger" link @click="openRejectDialog(row)">
                 驳回
               </el-button>
             </template>

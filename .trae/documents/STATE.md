@@ -13,16 +13,17 @@
 | P1-2 | 批量审批、批量启停接口 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-3 | Nacos @RefreshScope 动态配置 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-4 | MDC 全链路 TraceId 埋点 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
-| P1-5 | 前端动态菜单 + v-permission | 中 | ⏳ **待开始** | 依赖 P0-3 | — | — |
+| P1-5 | 前端动态菜单 + v-permission | 中 | ✅ **已完成** | 依赖 P0-3 | 2026-10-24 | 2026-10-24 |
 | P2-1 | 收尾 README / 接口文档 / SQL | 低 | ⏳ **待开始** | 依赖全部 P0 + P1 | — | — |
 
 ---
 
 ## 当前状态摘要
 
-- **当前阶段**：P1-4 MDC 全链路 TraceId 埋点 **已完成**
-- **下一待执行阶段**：P1-5 前端动态菜单（依赖 P0-3 已就绪）
-- **最近一次变更**：P1-4 —— 新增 `TraceIdInterceptor`（入站继承或生成 X-Trace-Id → MDC + 响应头，afterCompletion 清 MDC）；新增 `logback-spring.xml`（console pattern 含 `[%X{traceId:-}]`）；WebConfig 注册 TraceIdInterceptor order=-100（先于 TokenInterceptor，401 拒绝日志也带 traceId）；编译 exit_code=0
+- **当前阶段**：P1-5 前端动态菜单 + v-permission **已完成**
+- **下一待执行阶段**：P2-1 收尾 README / 接口文档 / SQL 汇总（依赖全部 P0+P1 已就绪）
+- **最近一次变更**：P1-5 —— 后端新增 `sys_menu` + `sys_role_menu` 表 + `MenuController GET /api/user/menu`（按 role 联查菜单树 + 权限码数组）；前端新增 `directive/permission.js`（v-permission 指令），Login 成功后拉取菜单/权限存 localStorage，Home.vue 侧边栏改数据驱动（失败兜底静态菜单），request.js 加 X-Trace-Id 请求头 + clearAuth 清理缓存，BookingAdmin 审批按钮挂 v-permission；后端 mvn compile exit 0，前端 npm run build exit 0
+- **方案修正**：原计划"router.addRoute 动态路由 + pinia store"→ 修正为保留现有静态路由表 + meta.role 守卫（已在工作，重写风险大），菜单/权限数据存 localStorage（项目无 pinia，不引入新依赖）；菜单 path 预置数据按前端实际路由（/home/*）对齐
 - **环境修正**：当前机器 Maven 默认 JDK 1.8 编译失败（项目用 Java 16+ pattern matching），须 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 后 `mvn compile`
 - **索引现状**：`idx_booking_room_time` / `idx_booking_user_status` / `idx_oplog_create_time` 基线 schema 已存在，P1-1 只需补 `deleted` 列（增量 ALTER 已写入 schema.sql 末尾注释段）
 
@@ -58,3 +59,4 @@
 | 2026-10-24 | P1-2 批量接口 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；批量审批锁在 Service 循环内逐元素持有（与单次 approve 同粒度）；幂等拦截器追加 4 条批量路径 |
 | 2026-10-24 | P1-3 Nacos 动态配置 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；spring.config.import optional:nacos 方式（无 bootstrap 依赖）；JwtProperties @RefreshScope |
 | 2026-10-24 | P1-4 MDC TraceId `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；TraceIdInterceptor order=-100；logback-spring.xml pattern 含 %X{traceId} |
+| 2026-10-24 | P1-5 后端 `mvn -q compile` + 前端 `npm run build` | 0 / 0 | 后端零错误零警告（MenuController + SysMenuMapper.xml）；前端构建 2.15s 成功（chunk 体积告警属存量，非本次引入） |

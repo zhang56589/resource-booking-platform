@@ -43,7 +43,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { login } from '@/api/auth'
+import { login, getUserMenu } from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -69,6 +69,15 @@ const handleLogin = async () => {
       localStorage.setItem('role', String(role))
       localStorage.setItem('userId', String(userId))
       localStorage.setItem('username', username)
+      // P1-5：登录后拉取动态菜单树 + 权限码数组（失败不阻断登录，侧边栏兜底静态菜单）
+      try {
+        const menuRes = await getUserMenu()
+        localStorage.setItem('menus', JSON.stringify(menuRes.data.menus || []))
+        localStorage.setItem('permissions', JSON.stringify(menuRes.data.permissions || []))
+      } catch (e) {
+        localStorage.removeItem('menus')
+        localStorage.removeItem('permissions')
+      }
       ElMessage.success('登录成功')
       const redirect = route.query.redirect
       if (redirect) {

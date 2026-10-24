@@ -16,6 +16,8 @@ function clearAuth() {
   localStorage.removeItem('role')
   localStorage.removeItem('userId')
   localStorage.removeItem('username')
+  localStorage.removeItem('menus')
+  localStorage.removeItem('permissions')
 }
 
 function redirectToLogin(msg) {
@@ -33,13 +35,17 @@ function redirectToLogin(msg) {
   }, 800)
 }
 
-// 请求拦截器：自动携带 Authorization: Bearer <token>
+// 请求拦截器：自动携带 Authorization: Bearer <token> + X-Trace-Id（P1-4 全链路追踪）
 request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 生成 TraceId，后端 TraceIdInterceptor 继承后贯穿该请求全部日志
+    config.headers['X-Trace-Id'] =
+      (crypto.randomUUID && crypto.randomUUID().replace(/-/g, '')) ||
+      `${Date.now()}${Math.random().toString(16).slice(2)}`
     return config
   },
   (error) => Promise.reject(error)

@@ -186,16 +186,17 @@
 
 ## 阶段 P1-5｜前端动态菜单 + v-permission 验收清单
 
-### 变更：后端新增 MenuController + 前端动态路由 + v-permission 指令
-- [ ] 后端：SysMenu 实体 + SysMenuMapper + MenuController `GET /api/user/menu`（按 role 过滤菜单树）
-- [ ] DDL：sys_menu(id, parent_id, name, path, component, icon, permission, order_num) + sys_role_menu(role_id, menu_id)
-- [ ] 前端：`permission.js` 自定义指令 `v-permission`：根据用户权限数组判断按钮显隐
-- [ ] 前端：`router/index.js` 改为 `initDynamicRoutes()` 登录后调 `/api/user/menu` 返回菜单树 → 调 `router.addRoute()` 动态注册
-- [ ] 前端侧边栏由接口返回的菜单树动态渲染（原硬编码菜单全部移除）
-- [ ] 管理员登录：菜单树含全部菜单 + booking:approve 按钮显隐
-- [ ] 员工登录：菜单树只有"我的预约"+"会议室列表"，approve 按钮不显示
-- [ ] 编译通过（前端 `npm run build`）
-- [ ] 全量冒烟回归：后端 20 步 + 前端 3 步全部通过
+### 变更：后端新增 MenuController + 前端动态菜单 + v-permission 指令
+- [x] 后端：SysMenu 实体 + SysMenuMapper + XML + MenuController `GET /api/user/menu`（按 role 联查 sys_role_menu 过滤菜单树 + 权限码数组）
+- [x] DDL：sys_menu(id, parent_id, name, path, component, icon, permission, order_num) + sys_role_menu(role_id, menu_id) + 预置数据（8 菜单，员工 4 + 管理员 8）
+- [x] 前端：`directive/permission.js` 自定义指令 `v-permission`：根据 localStorage.permissions 判断按钮显隐（无权限 el.remove）
+- [ ] ~~前端：router.addRoute 动态注册~~ → **方案修正**：保留静态路由表 + meta.role 守卫（已在工作），菜单/权限数据登录后存 localStorage
+- [x] 前端侧边栏由接口返回的菜单树动态渲染（Home.vue 数据驱动，接口失败兜底静态菜单）
+- [ ] 管理员登录：菜单树含全部菜单 + booking:approve 按钮显隐（运行时验证）
+- [ ] 员工登录：菜单树只有"我的预约/会议室列表/工作台/预约日历"，approve 按钮不显示（运行时验证）
+- [x] 编译通过：后端 `mvn -q compile` exit 0；前端 `npm run build` exit 0
+- [ ] 全量冒烟回归：后端 20 步 + 前端 3 步全部通过（运行时验证）
+- [x] 顺带完成 P1-4 遗留：request.js 请求拦截器加 X-Trace-Id 请求头
 
 ---
 

@@ -78,7 +78,9 @@ const router = useRouter()
 const role = computed(() => Number(localStorage.getItem('role')))
 const username = computed(() => localStorage.getItem('username') || '用户')
 
-const menus = computed(() =>
+// P1-5：优先使用后端下发的动态菜单（登录时写入 localStorage.menus），
+// 接口失败或未拉取时回退到静态菜单兜底，保证侧边栏永不空白
+const fallbackMenus = computed(() =>
   role.value === 1
     ? [
         { path: '/home/dashboard', title: '工作台' },
@@ -95,6 +97,21 @@ const menus = computed(() =>
         { path: '/home/my-bookings', title: '我的预约' }
       ]
 )
+
+const menus = computed(() => {
+  try {
+    const raw = localStorage.getItem('menus')
+    if (raw) {
+      const list = JSON.parse(raw)
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((m) => ({ path: m.path, title: m.name }))
+      }
+    }
+  } catch (e) {
+    // 解析失败走兜底
+  }
+  return fallbackMenus.value
+})
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || '')
@@ -121,6 +138,9 @@ const handleLogout = async () => {
   localStorage.removeItem('role')
   localStorage.removeItem('userId')
   localStorage.removeItem('username')
+  // P1-5：退出时同步清理动态菜单与权限缓存
+  localStorage.removeItem('menus')
+  localStorage.removeItem('permissions')
   router.push('/login')
 }
 </script>
