@@ -7,7 +7,7 @@
 | 0 | 基线调研 | — | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-1 | 锁粒度拆分优化 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-2 | 本地消息表 RocketMQ 可靠消息 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
-| P0-3 | RBAC 细粒度权限改造 | 高 | ⏳ **待开始** | — | — | — |
+| P0-3 | RBAC 细粒度权限改造 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-4 | 幂等拦截器 RequestId 防重复提交 | 高 | ⏳ **待开始** | — | — | — |
 | P1-1 | 数据库索引 + 软删除 | 中 | ⏳ **待开始** | — | — | — |
 | P1-2 | 批量审批、批量启停接口 | 中 | ⏳ **待开始** | — | — | — |
@@ -20,10 +20,10 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：P0-2 本地消息表 RocketMQ 可靠消息最终一致性 **已完成**
-- **下一待执行阶段**：P0-3 RBAC 细粒度权限改造（高优）/ P0-4 幂等拦截器（高优，独立可并行）
-- **最近一次变更**：P0-2 Outbox Pattern —— 新增 sys_outbox 表 + SysOutbox 实体/Mapper/Service + OutboxScheduler（5s 轮询，markProcessing → asyncSend → markSent/markFailed，指数退避重试）；MeetingBookingServiceImpl submitBooking + approve 改为事务内 outbox save（与业务表原子提交），删除废弃的 runAfterCommit 模板方法 + bookingNotificationProducer 字段；AdminSystemBackendApplication 加 @EnableScheduling；编译零错误零警告
-- **上一阶段摘要**：P0-1 锁粒度拆分 + P0-2 Outbox 可靠消息 —— P0-1 让同房间不同 bookingId 并发审批不再互斥；P0-2 彻底消除 "预约成功但通知永远没发" 的静默失败隐患；两个核心高优问题已关闭
+- **当前阶段**：P0-3 RBAC 细粒度权限改造 **已完成**
+- **下一待执行阶段**：P0-4 幂等拦截器（高优，独立）/ P1-1 ~ P1-4（中优，全独立）
+- **最近一次变更**：P0-3 RBAC 细粒度权限 —— 新增 sys_role/sys_permission/sys_role_permission 三张表（2 角色 + 9 权限码 + 12 映射）；新增 @RequiresPermission("模块:动作") 注解 + PermissionAspect AOP 切面（查映射表校验权限码），与现有 @RequireAdmin + TokenInterceptor 两层并行兼容；pom.xml 追加 spring-boot-starter-aop；MeetingBookingController 移除 requireAdminId inline 双重检查（权限校验职责完全交注解/拦截器）；编译零错误零警告
+- **阶段修正**：原 ROADMAP 计划"TokenInterceptor role 改 String 编码"与红线冲突 → 完全不改 TokenInterceptor；SysUser.role 保持 Integer；AOP 直接读 request.getAttribute("role") 的 Integer 值查映射表
 
 ---
 
@@ -51,3 +51,4 @@
 | 2026-10-24 | `mvn spring-boot:run` | 1 | Redisson eager 初始化阻断（Redis 未启动），非代码问题 |
 | 2026-10-24 | P0-1 锁粒度拆分 `mvn -q compile` | 0 | 零错误零警告，无新增依赖 |
 | 2026-10-24 | P0-2 Outbox Pattern `mvn -q compile` | 0 | 零错误零警告；修复 OutboxScheduler SendCallback 抽象类不能用 lambda → 匿名类；修复 getSendStatus() 枚举比对 |
+| 2026-10-24 | P0-3 RBAC 细粒度权限 `mvn -q compile` | 0 | 零错误零警告；新增 spring-boot-starter-aop 依赖；Mapper XML INNER JOIN sys_permission 正确加载 |

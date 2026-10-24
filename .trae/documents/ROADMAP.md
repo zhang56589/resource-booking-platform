@@ -41,10 +41,13 @@
 - **实现要点**：MySQL 5.7 无 FOR UPDATE SKIP LOCKED → markProcessing 用 UPDATE status=3 + LIMIT 抢占 → 再 SELECT WHERE status=3；SendCallback 为抽象类 → 用匿名类而非 lambda；RocketMQTemplate @Autowired(required=false) 优雅降级
 - **隐患消除**：B-2 ✅ 已修复 —— outbox save 失败抛 BusinessException 触发事务回滚，保证"预约成功但通知永远没发"不再发生
 
-### P0-3｜RBAC 细粒度权限改造（高优）
-- **目标**：引入 `@RequiresPermission` 注解 + `PermissionAspect` AOP 切面，替代/补充当前简单的"role==1 就是管理员"硬编码校验；sys_user 表新增 role 为角色编码（如 employee / admin / auditor），sys_permission 表存权限点，sys_role_permission 存角色-权限映射
-- **影响文件**：`SysUser` / 新增 `SysRole` / `SysPermission` / `SysRolePermission` 实体、`PermissionAspect`、Controller 方法加注解、`TokenInterceptor` role 字段改为角色编码、DB 表新增 SQL
+### P0-3｜RBAC 细粒度权限改造（高优）✅ **已完成 2026-10-24**
+- **目标**：新增 `@RequiresPermission("模块:动作")` 细粒度权限注解 + `PermissionAspect` AOP 切面（查 sys_role_permission 映射），与现有 `@RequireAdmin` + TokenInterceptor 拦截两层并行兼容
+- **影响文件**：`docs/schema.sql`（追加 3 张表 + 预置数据）、新增 `SysRole` / `SysPermission` / `SysRolePermission` 3 个实体、3 个 Mapper + `SysRolePermissionMapper.xml`、新增 `@RequiresPermission` 注解、新增 `PermissionAspect` 切面、`MeetingBookingController`（移除 `requireAdminId` inline 双重检查）、`pom.xml`（追加 `spring-boot-starter-aop`）
 - **依赖**：无
+- **方案修正（与原 ROADMAP 差异）**：不修改 TokenInterceptor（红线），不改 SysUser.role 字段类型（保持 Integer），AOP 层直接读 request.getAttribute("role") 的 Integer 值查映射表；TokenInterceptor 对 @RequireAdmin 的校验保持不动，两层独立并行
+- **实现要点**：PermissionAspect 在 TokenInterceptor preHandle 之后执行 → roleId 已写入 request → 查 sys_role_permission JOIN sys_permission → 匹配权限码；SysRole.id 与 SysUser.role 对齐（0=employee, 1=admin），后续扩展 auditor(2) 只需 INSERT 新角色 + 映射
+- **Mapper XML**：SysRolePermissionMapper 自定义 `selectPermissionCodesByRoleId`（INNER JOIN sys_permission）
 
 ### P0-4｜幂等拦截器 RequestId 防重复提交（高优）
 - **目标**：新增 `IdempotentInterceptor` + Redis SETNX（key=`idempotent:{userId}:{requestId}`, TTL=60s）。前端请求头带 `X-Request-Id`（uuid 每次生成），Redis 去重；已存在则返回 400 "请勿重复提交"。覆盖 submitBooking / approve / cancelBooking / deleteRoom

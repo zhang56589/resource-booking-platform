@@ -5,7 +5,6 @@ import com.example.adminsystem.annotation.RequireAdmin;
 import com.example.adminsystem.dto.ApproveBookingDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
-import com.example.adminsystem.enums.UserRoleEnum;
 import com.example.adminsystem.service.MeetingBookingService;
 import com.example.adminsystem.util.Result;
 import com.example.adminsystem.vo.BookingVO;
@@ -64,18 +63,6 @@ public class MeetingBookingController {
         return idObj == null ? null : Long.parseLong(idObj.toString());
     }
 
-    /**
-     * #3 同时要求已登录 + 具备管理员角色。
-     * 注意：和 @RequireAdmin 注解形成双重保险，防止漏注解的场景。
-     */
-    private Long requireAdminId(HttpServletRequest request) {
-        Long userId = requireUserId(request);
-        if (userId == null) return null;
-        Object roleObj = request.getAttribute("role");
-        if (!UserRoleEnum.ADMIN.getCode().equals(roleObj)) return null;
-        return userId;
-    }
-
     @PostMapping("/submit")
     public Result<?> submit(@Valid @RequestBody BookingDTO dto, HttpServletRequest request) {
         Long userId = requireUserId(request);
@@ -130,7 +117,8 @@ public class MeetingBookingController {
     @PostMapping("/approve")
     public Result<?> approve(@Valid @RequestBody ApproveBookingDTO dto,
                              HttpServletRequest request) {
-        Long adminId = requireAdminId(request);
+        // adminId 仅用于 Service 层写操作日志，@RequireAdmin 注解已确保当前用户是管理员
+        Long adminId = requireUserId(request);
         if (adminId == null) {
             return Result.fail(Result.UNAUTHORIZED, MSG_UNAUTHORIZED);
         }

@@ -71,17 +71,28 @@
 
 ## 阶段 P0-3｜RBAC 细粒度权限改造 验收清单
 
-### 变更：sys_user.role 改为编码 + 新增 sys_role / sys_permission / sys_role_permission + @RequiresPermission
-- [ ] DDL 输出 3 张新表：sys_role（id, code, name, description） / sys_permission（id, code, name） / sys_role_permission（role_id, permission_id）
-- [ ] 预置数据：admin → booking:approve, booking:submit, room:*, user:*；employee → booking:submit, booking:cancel
-- [ ] SysUser.role 字段从 Integer 改为 String（存角色编码 "admin" / "employee"）
-- [ ] TokenInterceptor 把 role 存为编码而非 Integer
-- [ ] 新增 `@RequiresPermission("booking:approve")` 注解
-- [ ] 新增 `PermissionAspect` 切面，AOP 拦截 → 从 request.getAttribute("role") 取角色编码 → 查 sys_role_permission → 校验 code
-- [ ] Controller 方法加注解：MeetingBookingController.approve → `@RequiresPermission("booking:approve")`；MeetingRoomController 全部写操作 → `@RequiresPermission("room:write")`
-- [ ] 无权限用户（employee）调 admin 接口 → 403
-- [ ] 编译通过
-- [ ] 全量冒烟回归：20 步全部通过（role 校验逻辑不变，只是改实现方式）
+### ⚠️ 方案修正（与原计划差异）
+- ~~TokenInterceptor role 改 String 编码~~ → **不改**（红线）
+- ~~SysUser.role 从 Integer 改 String~~ → **保持 Integer**（0=employee, 1=admin）
+- AOP 直接读 request.getAttribute("role") 的 Integer 值查映射表，与 TokenInterceptor 两层并行
+
+### 变更：新增 sys_role / sys_permission / sys_role_permission + @RequiresPermission + PermissionAspect
+- [x] DDL 输出 3 张新表：sys_role（id=TINYINT, code, name, description） / sys_permission（id, code, name） / sys_role_permission（role_id, permission_id）
+- [x] 预置数据：sys_role 2 条（employee=0, admin=1）；sys_permission 9 条（booking:submit/cancel/approve/admin, room:list/write, user:page/write, log:page）；sys_role_permission 12 条（员工 3 + 管理员全 9）
+- [x] 新增 `@RequiresPermission("booking:approve")` 注解（value + message）
+- [x] 新增 `PermissionAspect` AOP 切面：`@Around("@annotation(rp)")` → 从 request.getAttribute("role") 取 Integer roleId → 查 sys_role_permission JOIN sys_permission → codes.contains(rp.value())
+- [x] 新增 `SysRolePermissionMapper.xml`：`selectPermissionCodesByRoleId` 自定义 SQL
+- [x] pom.xml 追加 `spring-boot-starter-aop` 依赖（提供 aspectjweaver）
+- [x] MeetingBookingController 移除 `requireAdminId` inline 双重检查（@RequireAdmin 注解已覆盖管理员校验，Service 层 adminId 只用于操作日志）
+- [ ] Controller 方法加 `@RequiresPermission` 注解（**渐进策略第一阶段：现有 @RequireAdmin 保持不动，新注解 + 切面基础设施就绪，第二阶段逐步替换**）
+- [ ] 无权限用户（employee）调 `@RequiresPermission("booking:approve")` 接口 → 403
+- [ ] 已有的 @RequireAdmin 接口（TokenInterceptor 处理）→ 行为不变
+- [x] 编译通过：`mvn -q compile`（exit_code=0）
+- [ ] 全量冒烟回归：20 步全部通过（role 校验逻辑不变，两套权限机制并行兼容）
+- [ ] DB 验证：`SELECT COUNT(*) FROM sys_role` = 2, `sys_permission` = 9, `sys_role_permission` = 12
+
+### 后续可优化（P1+）
+- PermissionAspect 每次拦截查 DB → 可加 Redis 本地缓存（roleId → List<String> codes），TTL 10min
 
 ---
 

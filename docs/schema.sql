@@ -132,4 +132,65 @@ CREATE TABLE `sys_outbox` (
     INDEX `idx_outbox_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地消息表（Transaction Outbox Pattern）';
 
+-- ========================================================================
+-- P0-3 新增：RBAC 细粒度权限三张表
+--   sys_role.id 与 SysUser.role(Integer) 对齐：0=employee, 1=admin
+--   sys_permission.code 统一 "模块:动作" 格式，如 booking:approve
+--   sys_role_permission 多对多中间表
+-- ========================================================================
+DROP TABLE IF EXISTS `sys_role_permission`;
+DROP TABLE IF EXISTS `sys_permission`;
+DROP TABLE IF EXISTS `sys_role`;
+
+CREATE TABLE `sys_role` (
+    `id`          TINYINT      NOT NULL COMMENT '与 SysUser.role 对齐：0=employee, 1=admin',
+    `code`        VARCHAR(32)  NOT NULL COMMENT '角色编码：employee / admin',
+    `name`        VARCHAR(64)  NOT NULL COMMENT '角色显示名',
+    `description` VARCHAR(256) DEFAULT NULL COMMENT '角色描述',
+    `create_time` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_role_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色表';
+
+CREATE TABLE `sys_permission` (
+    `id`          INT          NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `code`        VARCHAR(64)  NOT NULL COMMENT '权限码，模块:动作，如 booking:approve',
+    `name`        VARCHAR(128) NOT NULL COMMENT '权限显示名',
+    `create_time` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_perm_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限点表';
+
+CREATE TABLE `sys_role_permission` (
+    `role_id`       TINYINT NOT NULL COMMENT '外键 sys_role.id',
+    `permission_id` INT     NOT NULL COMMENT '外键 sys_permission.id',
+    PRIMARY KEY (`role_id`, `permission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色-权限关联表';
+
+-- ========================================================================
+-- P0-3 RBAC 预置数据
+-- ========================================================================
+INSERT INTO `sys_role` (`id`, `code`, `name`, `description`) VALUES
+    (0, 'employee', '普通员工', '可提交/取消预约'),
+    (1, 'admin',    '管理员',   '审批预约/会议室/用户管理/日志');
+
+INSERT INTO `sys_permission` (`code`, `name`) VALUES
+    ('booking:submit',  '提交预约'),
+    ('booking:cancel',  '取消预约'),
+    ('booking:approve', '审批预约'),
+    ('booking:admin',   '查看全部预约'),
+    ('room:list',       '查看会议室'),
+    ('room:write',      '增删改启停用会议室'),
+    ('user:page',       '用户列表'),
+    ('user:write',      '启用/禁用/改角色/重置密码'),
+    ('log:page',        '查看日志');
+
+-- 员工权限（提交预约 + 取消预约 + 查看会议室）
+INSERT INTO `sys_role_permission` (`role_id`, `permission_id`) VALUES
+    (0, 1), (0, 2), (0, 5);
+
+-- 管理员权限（全部）
+INSERT INTO `sys_role_permission` (`role_id`, `permission_id`) VALUES
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9);
+
 SET FOREIGN_KEY_CHECKS = 1;
