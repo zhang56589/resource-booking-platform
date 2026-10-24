@@ -148,6 +148,12 @@
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
         </dependency>
 
+        <!-- P1-3：Nacos 配置中心（@RefreshScope 热刷新 jwt / rocketmq 配置） -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+
         <!-- Redisson 分布式锁 -->
         <dependency>
             <groupId>org.redisson</groupId>

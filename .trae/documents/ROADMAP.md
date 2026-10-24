@@ -69,10 +69,12 @@
 - **依赖**：无
 - **实施摘要**：新增 `BookingBatchApproveDTO` / `RoomBatchDTO`；批量审批锁粒度与单次 approve 一致（`booking:approve:{bookingId}`），Service 循环内逐元素 tryLock/unlock（不同时持多锁，无死锁）；会议室批量操作复用单次 enable/disable/delete 全部校验（含未完结预约拦截）；Controller 加 `@RequireAdmin` + `@RequiresPermission` 双层校验；幂等拦截器追加 4 条批量路径
 
-### P1-3｜Nacos @RefreshScope 动态配置抽离（中优）
+### P1-3｜Nacos @RefreshScope 动态配置抽离（中优）✅ **已完成 2026-10-24**
 - **目标**：把 application.yml 里的 `jwt.secretKey` / `jwt.expireMinutes` / `redisson.*` / `rocketmq.*` 抽到 Nacos 配置中心（dataId=admin-system-backend.yaml, group=DEFAULT_GROUP）。配置类加 `@RefreshScope` 热刷新
 - **影响文件**：`JwtProperties` 加 `@RefreshScope`、application.yml 改为 bootstrap.yml + 移除对应 key、Nacos 配置初始化脚本
 - **依赖**：无（但需要 Nacos 启动）
+- **实施摘要**：pom.xml 加 `spring-cloud-starter-alibaba-nacos-config`；application.yml 用 `spring.config.import: optional:nacos:admin-system-backend.yaml?group=DEFAULT_GROUP`（非 bootstrap.yml 方式，省一个 starter 依赖）；jwt / rocketmq 本地默认值保留作 Nacos 宕机兜底；`JwtProperties` 加 `@RefreshScope`
+- **方案修正**：bootstrap.yml → spring.config.import；移除本地 key → 保留本地默认值
 
 ### P1-4｜MDC 全链路 TraceId 埋点（中优）
 - **目标**：新增 `TraceIdInterceptor`（Servlet 层，优先级高于 TokenInterceptor）+ `MDCUtil`。入站请求生成 TraceId（UUID）写入 MDC + response Header `X-Trace-Id`；出站 Redis / DB / MQ 调用自动带 TraceId。logback-spring.xml 配置 pattern 含 `%X{traceId}`

@@ -156,15 +156,16 @@
 
 ## 阶段 P1-3｜Nacos @RefreshScope 动态配置 验收清单
 
-### 变更：配置抽离到 Nacos + @RefreshScope
-- [ ] 新增 `bootstrap.yml`：`spring.cloud.nacos.config.server-addr` + `shared-configs[].dataId=admin-system-backend.yaml`
-- [ ] `application.yml` 移除：jwt.secretKey / jwt.expireMinutes / rocketmq.*（保留 spring.datasource / spring.data.redis / spring.cloud.nacos.discovery）
-- [ ] JwtProperties 加 `@RefreshScope`
-- [ ] Nacos 控制台新建 dataId=admin-system-backend.yaml, group=DEFAULT_GROUP，填原 application.yml 里移除的配置
-- [ ] Nacos 修改 jwt.expireMinutes 后，调用接口签发的新 token 生效（旧 token 过期时间不变 —— 预期行为）
-- [ ] Nacos 修改 rocketmq.name-server 为空时 Producer Bean 不加载
-- [ ] 无 Nacos 配置时应用也能启动（使用 application.yml 默认值）
-- [ ] 编译通过
+### 变更：spring.config.import optional:nacos + @RefreshScope（方案修正：非 bootstrap.yml）
+- [x] 配置抽离到 Nacos：application.yml 加 `spring.config.import: optional:nacos:admin-system-backend.yaml?group=DEFAULT_GROUP` + `spring.cloud.nacos.config.server-addr`
+- [x] `JwtProperties` 加 `@RefreshScope`
+- [x] jwt / rocketmq 本地默认值保留（Nacos 宕机兜底，Nacos 有配置时覆盖）
+- [x] pom.xml 加 `spring-cloud-starter-alibaba-nacos-config` 依赖
+- [ ] Nacos 控制台新建 dataId=admin-system-backend.yaml, group=DEFAULT_GROUP，填 jwt / rocketmq 配置（运维操作）
+- [ ] Nacos 修改 jwt.expiration 后，调用接口签发的新 token 生效（旧 token 过期时间不变 —— 预期行为）
+- [ ] Nacos 修改 rocketmq.name-server 为空时 Producer Bean 不加载（注意：@ConditionalOnProperty 是启动时判断，改 name-server 需重启）
+- [ ] 无 Nacos 配置时应用也能启动（optional: 前缀 + 本地默认值）
+- [x] 编译通过：`mvn -q compile` exit_code=0（需 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`）
 - [ ] 全量冒烟回归：20 步全部通过
 
 ---

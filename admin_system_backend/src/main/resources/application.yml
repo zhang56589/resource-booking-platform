@@ -5,6 +5,12 @@ spring:
   application:
     name: admin-system-backend
 
+  # P1-3：Nacos 配置中心（optional: 前缀 = Nacos 不可达/无配置时用本地默认值启动）
+  # dataId=admin-system-backend.yaml, group=DEFAULT_GROUP；Nacos 控制台可热更新 jwt / rocketmq 配置
+  config:
+    import:
+      - optional:nacos:admin-system-backend.yaml?group=DEFAULT_GROUP
+
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/admin_system?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
@@ -37,6 +43,9 @@ spring:
         service: ${spring.application.name}
         # 单机 Nacos 用 false；集群 Nacos 用 true
         ephemeral: true
+      # P1-3：配置中心地址（与 discovery 同地址；spring.config.import 读取此处）
+      config:
+        server-addr: 127.0.0.1:8848
 
 mybatis-plus:
   configuration:
@@ -45,12 +54,13 @@ mybatis-plus:
     db-config:
       id-type: auto
 
-# jwt自定义配置
+# jwt自定义配置（P1-3：以下为本地默认值，Nacos dataId=admin-system-backend.yaml 可覆盖并热刷新）
 jwt:
   secret: abcdefghijklmnopqabcdefghijklmnopq123456
   expiration: 7200000      # 2小时，单位毫秒
 
 # RocketMQ 异步通知（可选：不配 name-server 时 BookingNotificationProducer 不加载）
+# P1-3：Nacos 可覆盖 name-server；注意 @ConditionalOnProperty 是启动时判断，改 name-server 需重启
 rocketmq:
   producer:
     group: booking-producer-group
