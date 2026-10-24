@@ -34,10 +34,12 @@
 - **影响文件**：`MeetingBookingController.java`（approve 方法锁 key 改 bookingId）、`MeetingBookingServiceImpl.java`（新增注释说明两种锁粒度）
 - **依赖**：无
 
-### P0-2｜本地消息表 RocketMQ 可靠消息最终一致性（高优）
+### P0-2｜本地消息表 RocketMQ 可靠消息最终一致性（高优）✅ **已完成 2026-10-24**
 - **目标**：新增 `sys_outbox` 表 + 定时任务轮询 outbox 表 → 发 MQ。解决当前 MQ 发送在 afterCommit 回调里但 Producer 异常吞掉导致"预约成功但通知永远没发"的隐患（DB 提交成功但 MQ 发送失败会静默跳过）
-- **影响文件**：新增 `sys_outbox` 表 SQL、`SysOutbox` 实体 + Mapper + Service、`OutboxScheduler` 定时任务、`MeetingBookingServiceImpl`（submit/approve 事务内写 outbox 替代 afterCommit 直接发 MQ）
+- **影响文件**：`docs/schema.sql`（sys_outbox CREATE TABLE）、新增 `SysOutbox` 实体 + Mapper + XML + Service + Impl、新增 `OutboxScheduler` 定时任务（`@Scheduled(cron="0/5 * * * * ?")`）、`MeetingBookingServiceImpl`（submitBooking + approve 事务内 outbox save 替代 afterCommit Producer，删除 runAfterCommit + bookingNotificationProducer）、`AdminSystemBackendApplication`（加 `@EnableScheduling`）
 - **依赖**：P0-1（锁粒度确认后再改 outbox，避免锁内 MQ 逻辑漂移）
+- **实现要点**：MySQL 5.7 无 FOR UPDATE SKIP LOCKED → markProcessing 用 UPDATE status=3 + LIMIT 抢占 → 再 SELECT WHERE status=3；SendCallback 为抽象类 → 用匿名类而非 lambda；RocketMQTemplate @Autowired(required=false) 优雅降级
+- **隐患消除**：B-2 ✅ 已修复 —— outbox save 失败抛 BusinessException 触发事务回滚，保证"预约成功但通知永远没发"不再发生
 
 ### P0-3｜RBAC 细粒度权限改造（高优）
 - **目标**：引入 `@RequiresPermission` 注解 + `PermissionAspect` AOP 切面，替代/补充当前简单的"role==1 就是管理员"硬编码校验；sys_user 表新增 role 为角色编码（如 employee / admin / auditor），sys_permission 表存权限点，sys_role_permission 存角色-权限映射

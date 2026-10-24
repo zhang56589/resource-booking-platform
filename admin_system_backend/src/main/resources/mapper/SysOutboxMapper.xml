@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.adminsystem.mapper.SysOutboxMapper">
+
+    <!-- ========== P0-2 Transaction Outbox Pattern SQL ========== -->
+
+    <!--
+        抢占一批待发送记录（MySQL 5.7 兼容方案）：
+        先 UPDATE 把 status=0 且到重试时间的记录标记为 status=3（处理中），
+        LIMIT 确保多实例 Scheduler 不会取同一批。
+        UPDATE 命中行数 = 本实例抢到的记录数；
+        下一个实例再 UPDATE 时，刚被标记 3 的记录已不在 status=0 范围里，自然跳过。
+    -->
+    <update id="markProcessing">
+        UPDATE sys_outbox
+        SET status = 3,
+            update_time = NOW()
+        WHERE status = 0
+          AND (next_retry_time IS NULL OR next_retry_time &lt;= NOW())
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </update>
+
+    <!-- 查询所有 status=3（处理中）的记录，准备发 MQ -->
+    <select id="selectProcessing" resultType="com.example.adminsystem.entity.SysOutbox">
+        SELECT id, msg_id, topic, tag, payload, status, retry_count, max_retry,
+               next_retry_time, create_time, update_time
+        FROM sys_outbox
+        WHERE status = 3
+        ORDER BY create_time ASC
+    </select>
+
+    <!-- 发送成功：标记 status=1（已发送） -->
+    <update id="markSent">
+        UPDATE sys_outbox
+        SET status = 1,
+            update_time = NOW()
+        WHERE id = #{id} AND status = 3
+    </update>
+
+    <!--
+        发送失败：retry_count++，指数退避计算 next_retry_time。
+        若 retry_count+1 >= max_retry，标记 status=2（死信），不再重试。
+        指数退避：2^n 秒（但封顶 2^5=32s，防止退避过长）。
+    -->
+    <update id="markFailed">
+        UPDATE sys_outbox
+        SET retry_count    = retry_count + 1,
+            status         = CASE WHEN retry_count + 1 >= max_retry THEN 2 ELSE 0 END,
+            next_retry_time = CASE
+                WHEN retry_count + 1 >= max_retry THEN NULL
+                ELSE DATE_ADD(NOW(), INTERVAL POWER(2, LEAST(retry_count + 1, 5)) SECOND)
+            END,
+            update_time     = NOW()
+        WHERE id = #{id} AND status = 3
+    </update>
+
+</mapper>

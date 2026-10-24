@@ -9,6 +9,7 @@ import com.example.adminsystem.dto.BookingQueryDTO;
 import com.example.adminsystem.entity.MeetingBooking;
 import com.example.adminsystem.entity.MeetingRoom;
 import com.example.adminsystem.entity.OperationLog;
+import com.example.adminsystem.entity.SysOutbox;
 import com.example.adminsystem.entity.SysUser;
 import com.example.adminsystem.enums.BookingStatusEnum;
 import com.example.adminsystem.enums.RoomStatusEnum;
@@ -16,31 +17,34 @@ import com.example.adminsystem.mapper.MeetingBookingMapper;
 import com.example.adminsystem.mapper.MeetingRoomMapper;
 import com.example.adminsystem.mapper.OperationLogMapper;
 import com.example.adminsystem.mapper.SysUserMapper;
-import com.example.adminsystem.service.BookingNotificationProducer;
 import com.example.adminsystem.service.MeetingBookingService;
+import com.example.adminsystem.service.SysOutboxService;
 import com.example.adminsystem.util.BusinessException;
 import com.example.adminsystem.util.IpUtil;
 import com.example.adminsystem.vo.BookingVO;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Service 内职责：
  *   1. DB FOR UPDATE 行锁（分布式锁的 DB 兜底）
  *   2. 业务校验 + 时间冲突校验
  *   3. insert/update 持久化 + 操作日志
- *   4. 预约通知异步发送（事务提交后才发，避免 MQ 先于事务回滚发出脏通知）
+ *   4. 预约通知 —— 本地消息表（P0-2）：outbox 记录和业务表同事务原子提交，
+ *      OutboxScheduler 定时任务轮询 outbox 调 RocketMQTemplate 发 MQ，指数退避自动重试。
+ *      解决之前 afterCommit Producer 异常静默吞掉 → 预约成功但通知永远没发的问题。
  *
  * 分布式锁（Redisson）由外层 MeetingBookingController 持有 —— 锁包事务，
  * 事务提交发生在 Controller finally unlock 之前，避免并发请求读到未提交数据。
@@ -60,8 +64,11 @@ public class MeetingBookingServiceImpl
     @Resource
     private SysUserMapper sysUserMapper;
 
-    @Autowired(required = false)
-    private BookingNotificationProducer bookingNotificationProducer;
+    /** P0-2：本地消息表 Service，事务内直接写 outbox（与业务表原子提交） */
+    @Resource
+    private SysOutboxService outboxService;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     // ===================== submitBooking =====================
     @Override
@@ -110,31 +117,25 @@ public class MeetingBookingServiceImpl
         saveOperateLog(userId, "预约会议室",
                 "提交预约，roomId:" + roomId + "，时间段：" + startTime + " ~ " + endTime + "，主题：" + dto.getTitle());
 
-        // ===== H2 关键修复：username 必须在 Lambda 之外提前取 final =====
-        // afterCommit 在事务提交后才执行，此时 RequestContextHolder ThreadLocal 可能已被容器清理，
-        // 在 Lambda 内部再去 request.getAttribute("username") 会拿到 null。
-        final ServletRequestAttributes attrs =
-                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        // 锁包事务场景下 attrs 必定存在；极端兜底为 ""
-        final String finalUsername = attrs != null && attrs.getRequest().getAttribute("username") != null
-                ? attrs.getRequest().getAttribute("username").toString() : "";
-        final Long bookingId = booking.getId();
-        final String finalRoomName = room.getRoomName();
-        final String startTimeStr = startTime.toString();
-        final String endTimeStr = endTime.toString();
+        // ===== P0-2：本地消息表 —— outbox 记录和 booking 同事务原子提交 =====
+        // 不再用 afterCommit 回调（P0-2 前的方案），改为事务内直接写 outbox：
+        //   事务回滚 → outbox 一起回滚（不会出现"预约回滚但 MQ 已发"）
+        //   事务提交 → outbox status=0 → OutboxScheduler 定时任务自动发 MQ，重试兜底
+        try {
+            final ServletRequestAttributes attrs =
+                    (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            final String finalUsername = attrs != null && attrs.getRequest().getAttribute("username") != null
+                    ? attrs.getRequest().getAttribute("username").toString() : "";
+            SysOutbox outbox = buildSubmitOutbox(booking.getId(), finalUsername, room.getRoomName(),
+                    startTime.toString(), endTime.toString(), userId);
+            outboxService.save(outbox);
+        } catch (Exception ex) {
+            // outbox 写入失败必须让主事务回滚 —— 保证"预约成功但通知永远没发"不会发生
+            log.error("Outbox 写入失败（触发事务回滚） bookingId={}", booking.getId(), ex);
+            throw new BusinessException(500, "系统消息队列暂时不可用，请稍后重试");
+        }
 
-        // ===== M4 + P0-2：afterCommit 模板方法 =====
-        runAfterCommit(() -> {
-            try {
-                bookingNotificationProducer.sendSubmitNotify(
-                        bookingId, finalUsername, finalRoomName,
-                        startTimeStr, endTimeStr, userId);
-            } catch (Exception ex) {
-                log.warn("MQ预约提交通知发送跳过(事务提交后): {}", ex.getMessage());
-            }
-        });
-
-        log.info("预约提交成功 bookingId={}, roomId={}, userId={}", bookingId, roomId, userId);
+        log.info("预约提交成功 bookingId={}, roomId={}, userId={}", booking.getId(), roomId, userId);
     }
 
     // ===================== approve =====================
@@ -180,23 +181,19 @@ public class MeetingBookingServiceImpl
         String resultText = BookingStatusEnum.PASS.getCode().equals(dto.getStatus()) ? "通过" : "驳回";
         saveOperateLog(adminId, "预约审批", "审批预约id=" + dto.getBookingId() + "，审批结果：" + resultText);
 
-        // ===== H2 关键修复：username 在 Lambda 外提前取 final =====
-        final Long bookingId = booking.getId();
+        // ===== P0-2：本地消息表 —— outbox 记录和审批更新同事务原子提交 =====
         final String resultCode = BookingStatusEnum.PASS.getCode().equals(dto.getStatus()) ? "PASS" : "REJECT";
-        final String rejectReason = booking.getRejectReason();
-        final String applicantUsername = getApplicantUsername(booking.getUserId());
+        try {
+            String applicantUsername = getApplicantUsername(booking.getUserId());
+            SysOutbox outbox = buildApproveOutbox(booking.getId(), applicantUsername,
+                    resultCode, booking.getRejectReason(), adminId);
+            outboxService.save(outbox);
+        } catch (Exception ex) {
+            log.error("Outbox 写入失败（触发事务回滚） bookingId={}", booking.getId(), ex);
+            throw new BusinessException(500, "系统消息队列暂时不可用，请稍后重试");
+        }
 
-        // ===== M4 + P0-2：afterCommit 模板方法 =====
-        runAfterCommit(() -> {
-            try {
-                bookingNotificationProducer.sendApproveNotify(
-                        bookingId, applicantUsername, resultCode, rejectReason, adminId);
-            } catch (Exception ex) {
-                log.warn("MQ审批通知发送跳过(事务提交后): {}", ex.getMessage());
-            }
-        });
-
-        log.info("预约审批完成 bookingId={}, result={}, adminId={}", bookingId, resultText, adminId);
+        log.info("预约审批完成 bookingId={}, result={}, adminId={}", booking.getId(), resultText, adminId);
     }
 
     // ===================== cancelBooking =====================
@@ -292,36 +289,62 @@ public class MeetingBookingServiceImpl
     }
 
     /**
-     * #4 + M4 afterCommit 模板方法 + isActualTransactionActive 兜底：
-     *   若当前有事务，在 afterCommit 执行 runnable（M4 消除 submit/approve 两段几乎一样的注册代码）；
-     *   若当前无事务（理论上不会出现），直接在当前线程执行（兜底，避免消息丢失）。
-     * bookingNotificationProducer 为 null 时跳过。
-     */
-    private void runAfterCommit(Runnable runnable) {
-        if (bookingNotificationProducer == null) return;
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            runnable.run();
-                        }
-                    }
-            );
-        } else {
-            runnable.run();
-        }
-    }
-
-    /**
-     * H2: approve 场景下，在 Lambda 外提前查好申请人 username，
-     * 避免 afterCommit 时 request ThreadLocal 可能已被清理。
-     * 注意：此查询发生在事务内（和 selectByIdForUpdate 同事务），性能可接受。
+     * H2: approve 场景下，在事务内查好申请人 username，
+     * 避免异步发送时 request ThreadLocal 可能已被清理。
      */
     private String getApplicantUsername(Long userId) {
         if (userId == null) return "";
         SysUser applicant = sysUserMapper.selectById(userId);
         return applicant != null && applicant.getUsername() != null ? applicant.getUsername() : "";
+    }
+
+    // ===================== P0-2 Outbox 构建辅助 =====================
+
+    private SysOutbox buildSubmitOutbox(Long bookingId, String username, String roomName,
+                                        String startTimeStr, String endTimeStr, Long userId) {
+        try {
+            String payload = JSON.writeValueAsString(Map.of(
+                    "bookingId", bookingId,
+                    "username", username == null ? "" : username,
+                    "roomName", roomName == null ? "" : roomName,
+                    "startTime", startTimeStr,
+                    "endTime", endTimeStr,
+                    "operatorId", userId == null ? "" : userId,
+                    "ts", System.currentTimeMillis()
+            ));
+            return buildOutbox("booking-notify-submit", null, payload);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Outbox payload 序列化失败", e);
+        }
+    }
+
+    private SysOutbox buildApproveOutbox(Long bookingId, String applicantUsername,
+                                         String result, String rejectReason, Long adminId) {
+        try {
+            String payload = JSON.writeValueAsString(Map.of(
+                    "bookingId", bookingId,
+                    "applicantUsername", applicantUsername == null ? "" : applicantUsername,
+                    "result", result,
+                    "rejectReason", rejectReason == null ? "" : rejectReason,
+                    "adminId", adminId == null ? "" : adminId,
+                    "ts", System.currentTimeMillis()
+            ));
+            return buildOutbox("booking-notify-approve", null, payload);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Outbox payload 序列化失败", e);
+        }
+    }
+
+    private SysOutbox buildOutbox(String topic, String tag, String payload) {
+        SysOutbox o = new SysOutbox();
+        o.setMsgId(UUID.randomUUID().toString().replace("-", ""));
+        o.setTopic(topic);
+        o.setTag(tag);
+        o.setPayload(payload);
+        o.setStatus(0);
+        o.setRetryCount(0);
+        o.setMaxRetry(3);
+        return o;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)

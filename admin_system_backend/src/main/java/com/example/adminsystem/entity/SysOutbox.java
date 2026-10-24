@@ -1,5 +1,6 @@
 package com.example.adminsystem.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -48,10 +49,10 @@ public class SysOutbox {
     /** 下次重试时间（指数退避计算） */
     private LocalDateTime nextRetryTime;
 
-    /** 写入时间 */
-    @TableField(fill = com.baomidou.mybatisplus.core.handlers.MetaObjectHandler.FieldFill.INSERT)
+    /** 写入时间（MyMetaObjectHandler 自动填充） */
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
-    @TableField(fill = com.baomidou.mybatisplus.core.handlers.MetaObjectHandler.FieldFill.INSERT_UPDATE)
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 }
