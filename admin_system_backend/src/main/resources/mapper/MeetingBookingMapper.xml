@@ -34,11 +34,12 @@
         mb.reason,
         mb.create_time
         FROM meeting_booking mb
-        LEFT JOIN meeting_room mr ON mb.room_id = mr.id
+        LEFT JOIN meeting_room mr ON mb.room_id = mr.id AND mr.deleted = 0
         LEFT JOIN sys_user su ON mb.user_id = su.id
         <where>
+            mb.deleted = 0
             <if test="roomId != null">
-                mb.room_id = #{roomId}
+                AND mb.room_id = #{roomId}
             </if>
             <if test="resStatus != null">
                 AND mb.status = #{resStatus}
@@ -63,10 +64,11 @@
         mb.reason,
         mb.create_time
         FROM meeting_booking mb
-        LEFT JOIN meeting_room mr ON mb.room_id = mr.id
+        LEFT JOIN meeting_room mr ON mb.room_id = mr.id AND mr.deleted = 0
         LEFT JOIN sys_user su ON mb.user_id = su.id
         <where>
-            mb.user_id = #{userId}
+            mb.deleted = 0
+            AND mb.user_id = #{userId}
             <if test="roomId != null">
                 AND mb.room_id = #{roomId}
             </if>
@@ -92,11 +94,12 @@
         mb.reason,
         mb.create_time
         FROM meeting_booking mb
-        LEFT JOIN meeting_room mr ON mb.room_id = mr.id
+        LEFT JOIN meeting_room mr ON mb.room_id = mr.id AND mr.deleted = 0
         LEFT JOIN sys_user su ON mb.user_id = su.id
         <where>
+            mb.deleted = 0
             <if test="dto != null and dto.roomId != null">
-                mb.room_id = #{dto.roomId}
+                AND mb.room_id = #{dto.roomId}
             </if>
             <if test="dto != null and dto.resStatus != null">
                 AND mb.status = #{dto.resStatus}
@@ -126,10 +129,11 @@
         mb.reason,
         mb.create_time
         FROM meeting_booking mb
-        LEFT JOIN meeting_room mr ON mb.room_id = mr.id
+        LEFT JOIN meeting_room mr ON mb.room_id = mr.id AND mr.deleted = 0
         LEFT JOIN sys_user su ON mb.user_id = su.id
         <where>
-            mb.user_id = #{userId}
+            mb.deleted = 0
+            AND mb.user_id = #{userId}
             <if test="dto != null and dto.roomId != null">
                 AND mb.room_id = #{dto.roomId}
             </if>

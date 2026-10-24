@@ -35,6 +35,7 @@ CREATE TABLE `meeting_room` (
     `location`     VARCHAR(100) DEFAULT NULL COMMENT '位置',
     `description`  VARCHAR(255) DEFAULT NULL COMMENT '描述',
     `enabled`      TINYINT      DEFAULT 1 COMMENT '1=启用 0=禁用',
+    `deleted`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
     `create_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `update_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`)
@@ -54,6 +55,7 @@ CREATE TABLE `meeting_booking` (
     `status`       TINYINT      NOT NULL COMMENT '状态 0=待审批 1=已通过 2=已驳回 3=已取消',
     `reject_reason` VARCHAR(255) DEFAULT NULL COMMENT '驳回理由',
     `reason`       VARCHAR(255) DEFAULT NULL COMMENT '申请理由',
+    `deleted`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
     `create_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `update_time`  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
@@ -194,3 +196,18 @@ INSERT INTO `sys_role_permission` (`role_id`, `permission_id`) VALUES
     (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9);
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ========================================================================
+-- P1-1 增量迁移（已存在的库执行本段；新库上方 CREATE TABLE 已含全部字段/索引）
+-- ========================================================================
+-- ALTER TABLE `meeting_booking` ADD INDEX `idx_booking_room_time` (`room_id`, `start_time`, `end_time`);
+-- ALTER TABLE `meeting_booking` ADD INDEX `idx_booking_user_status` (`user_id`, `status`);
+-- ALTER TABLE `operation_log`   ADD INDEX `idx_oplog_create_time` (`create_time`);
+-- ALTER TABLE `meeting_room`    ADD COLUMN `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删';
+-- ALTER TABLE `meeting_booking` ADD COLUMN `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删';
+--
+-- 回滚：
+-- ALTER TABLE `meeting_booking` DROP INDEX `idx_booking_room_time`, DROP INDEX `idx_booking_user_status`;
+-- ALTER TABLE `operation_log`   DROP INDEX `idx_oplog_create_time`;
+-- ALTER TABLE `meeting_room`    DROP COLUMN `deleted`;
+-- ALTER TABLE `meeting_booking` DROP COLUMN `deleted`;

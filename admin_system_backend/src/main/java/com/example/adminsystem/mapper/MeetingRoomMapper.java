@@ -16,7 +16,7 @@ public interface MeetingRoomMapper extends BaseMapper<MeetingRoom> {
      * 必须显式声明 @Results，否则 enabled → status 等字段将为 null，
      * 后续 room.getStatus() 等于 null 导致状态判断失效/NPE。
      */
-    @Select("SELECT * FROM meeting_room WHERE id = #{id} FOR UPDATE")
+    @Select("SELECT * FROM meeting_room WHERE id = #{id} AND deleted = 0 FOR UPDATE")
     @Results(id = "meetingRoomResult", value = {
             @Result(column = "id", property = "id"),
             @Result(column = "room_name", property = "roomName"),

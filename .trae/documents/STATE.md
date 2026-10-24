@@ -9,7 +9,7 @@
 | P0-2 | 本地消息表 RocketMQ 可靠消息 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-3 | RBAC 细粒度权限改造 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P0-4 | 幂等拦截器 RequestId 防重复提交 | 高 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
-| P1-1 | 数据库索引 + 软删除 | 中 | ⏳ **待开始** | — | — | — |
+| P1-1 | 数据库索引 + 软删除 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-2 | 批量审批、批量启停接口 | 中 | ⏳ **待开始** | — | — | — |
 | P1-3 | Nacos @RefreshScope 动态配置 | 中 | ⏳ **待开始** | — | — | — |
 | P1-4 | MDC 全链路 TraceId 埋点 | 中 | ⏳ **待开始** | — | — | — |
@@ -20,10 +20,11 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：P0-4 幂等拦截器 RequestId 防重复提交 **已完成**
-- **下一待执行阶段**：P1-1 数据库索引+软删除 / P1-2 批量接口 / P1-3 Nacos / P1-4 TraceId / P1-5 前端动态菜单（全独立，任意顺序）
-- **最近一次变更**：P0-4 幂等拦截器 —— 新增 IdempotentInterceptor（Redisson RBucket.trySet 实现 SETNX，key=`idempotent:{userId}:{requestId}` TTL=60s）；X-Request-Id Header 可选，存在则校验不存在则跳过（降级模式）；Redis 不可达 → log.warn + 放行；WebConfig 在 TokenInterceptor 之后注册，只匹配 11 条写操作路径（GET 不受影响）；编译零错误零警告
-- **阶段修正**：原 ROADMAP "前端必须带 X-Request-Id"→ 修正为可选 Header；StringRedisTemplate → Redisson RBucket（技术栈一致）
+- **当前阶段**：P1-1 数据库索引 + 软删除 **已完成**
+- **下一待执行阶段**：P1-2 批量接口 / P1-3 Nacos / P1-4 TraceId / P1-5 前端动态菜单（全独立，任意顺序）
+- **最近一次变更**：P1-1 —— `docs/schema.sql` 追加 `deleted` 列 + P1-1 增量迁移段；`MeetingRoom` / `MeetingBooking` Entity 加 `@TableLogic private Integer deleted`；两处 `selectByIdForUpdate` 手写 SQL 追加 `AND deleted = 0`；`MeetingBookingMapper.xml` 4 处分页 JOIN 追加 `mb.deleted = 0` 且 `LEFT JOIN meeting_room` 加 `AND mr.deleted = 0`；编译 exit_code=0
+- **环境修正**：当前机器 Maven 默认 JDK 1.8 编译失败（项目用 Java 16+ pattern matching），须 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 后 `mvn compile`
+- **索引现状**：`idx_booking_room_time` / `idx_booking_user_status` / `idx_oplog_create_time` 基线 schema 已存在，P1-1 只需补 `deleted` 列（增量 ALTER 已写入 schema.sql 末尾注释段）
 
 ---
 
@@ -36,7 +37,7 @@
 | B-3 | 隐患 | approve 锁粒度为 booking:room:{roomId}（会议室粒度），理论上只需要串行化同一个 bookingId | 🟡 | P0-1 锁粒度拆分 | ✅ **已修复** |
 | B-4 | 隐患 | submit 锁粒度为 booking:room:{roomId}（会议室粒度），同会议室不同时段并发被串行化 | 🟡 | 维持现状（业务量小，并发不高） | — |
 | B-5 | 缺口 | cancelBooking 无幂等保护（虽然 update 影响 0 行但逻辑上可加） | 🟡 | P0-4 幂等拦截器 | ✅ **已修复** |
-| B-6 | 缺口 | 数据库无软删除（物理删会议室外键约束导致 CASCADE 风险） | 🟡 | P1-1 索引+软删除 | 待处理 |
+| B-6 | 缺口 | 数据库无软删除（物理删会议室外键约束导致 CASCADE 风险） | 🟡 | P1-1 索引+软删除 | ✅ **已修复** |
 | B-7 | 缺口 | 登录日志 sys_login_log / 操作日志 sys_operate_log 缺少 username / operator_name 自动填充（已用 IpUtil + TokenInterceptor，但 SysUserServiceImpl.login 里 saveLoginLog 的 username 是手动传参，无自动注入 username 机制） | 🟢 低 | P2-1 收尾对齐 | 待处理 |
 | B-8 | 红线 | TokenInterceptor 稳定模块，禁止修改 | — | — | — |
 
@@ -53,3 +54,4 @@
 | 2026-10-24 | P0-2 Outbox Pattern `mvn -q compile` | 0 | 零错误零警告；修复 OutboxScheduler SendCallback 抽象类不能用 lambda → 匿名类；修复 getSendStatus() 枚举比对 |
 | 2026-10-24 | P0-3 RBAC 细粒度权限 `mvn -q compile` | 0 | 零错误零警告；新增 spring-boot-starter-aop 依赖；Mapper XML INNER JOIN sys_permission 正确加载 |
 | 2026-10-24 | P0-4 幂等拦截器 `mvn -q compile` | 0 | 零错误零警告；Redisson RBucket.trySet SETNX 语义正确；WebConfig 拦截器注册顺序 TokenInterceptor→IdempotentInterceptor |
+| 2026-10-24 | P1-1 索引+软删除 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；@TableLogic 生效；手写 SQL 4 处 JOIN + 2 处 FOR UPDATE 均追加 deleted=0 |

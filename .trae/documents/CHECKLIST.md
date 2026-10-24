@@ -122,15 +122,15 @@
 ## 阶段 P1-1｜数据库索引优化 + 软删除改造 验收清单
 
 ### 变更：ALTER TABLE 加索引 + 加 deleted 字段 + MyBatis-Plus @TableLogic
-- [ ] meeting_booking 加索引：`CREATE INDEX idx_booking_room_time ON meeting_booking(room_id, start_time, end_time)`、`CREATE INDEX idx_booking_user_status ON meeting_booking(user_id, res_status)`
-- [ ] operation_log 加索引：`CREATE INDEX idx_oplog_time ON operation_log(create_time)`
-- [ ] meeting_room / meeting_booking 加列：`deleted TINYINT(1) DEFAULT 0` + `@TableLogic`
-- [ ] Entity 加 `private Integer deleted` + `@TableLogic`
-- [ ] MyBatis XML 手写 JOIN 需确认自动追加 `AND deleted = 0`（如果手写 SQL 绕过 MP，需手动加）
-- [ ] 软删除 DELETE 变 UPDATE：`UPDATE meeting_room SET deleted=1 WHERE id=?`
-- [ ] 已删除会议室 selectById 返回 null
-- [ ] 删除会议室前置校验（未完结预约）软删除仍生效（`delete=0 AND res_status IN (0,1)` 不影响业务逻辑）
-- [ ] 编译通过
+- [x] meeting_booking 加索引：`CREATE INDEX idx_booking_room_time ON meeting_booking(room_id, start_time, end_time)`、`CREATE INDEX idx_booking_user_status ON meeting_booking(user_id, res_status)` —— **基线 schema 已存在**
+- [x] operation_log 加索引：`CREATE INDEX idx_oplog_create_time ON operation_log(create_time)` —— **基线 schema 已存在**
+- [x] meeting_room / meeting_booking 加列：`deleted TINYINT(1) DEFAULT 0` + `@TableLogic`（Entity 已加，DDL 增量段已输出到 schema.sql 末尾注释）
+- [x] Entity 加 `private Integer deleted` + `@TableLogic`（MeetingRoom.java / MeetingBooking.java）
+- [x] MyBatis XML 手写 JOIN 已追加 `AND deleted = 0`：MeetingBookingMapper.xml 4 处分页（`mb.deleted=0` + LEFT JOIN mr `AND mr.deleted=0`）；2 处 `selectByIdForUpdate`（MeetingBookingMapper.java:33 / MeetingRoomMapper.java:19）
+- [x] 软删除 DELETE 变 UPDATE：`MeetingRoomServiceImpl.deleteRoom` 走 MP `removeById` + `@TableLogic` → 自动转 `UPDATE meeting_room SET deleted=1 WHERE id=? AND deleted=0`
+- [ ] 已删除会议室 selectById 返回 null（需运行后 DB 验证）
+- [ ] 删除会议室前置校验（未完结预约）软删除仍生效（MP 自动追加 `deleted=0`）
+- [x] 编译通过：`mvn -q compile` exit_code=0（需 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`）
 - [ ] 全量冒烟回归：20 步全部通过（物理删除行为不变，但软删除后 selectById 返回 null）
 
 ---

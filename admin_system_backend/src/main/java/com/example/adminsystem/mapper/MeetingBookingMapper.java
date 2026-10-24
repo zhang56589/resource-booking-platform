@@ -30,7 +30,7 @@ public interface MeetingBookingMapper extends BaseMapper<MeetingBooking> {
      * 必须显式声明 @Results，否则 status → resStatus 等字段将为 null，
      * 后续 equals 校验直接 NPE 被全局兜底成 500。
      */
-    @Select("SELECT * FROM meeting_booking WHERE id = #{id} FOR UPDATE")
+    @Select("SELECT * FROM meeting_booking WHERE id = #{id} AND deleted = 0 FOR UPDATE")
     @Results(id = "meetingBookingResult", value = {
             @Result(column = "id", property = "id"),
             @Result(column = "room_id", property = "roomId"),

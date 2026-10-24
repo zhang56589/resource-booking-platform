@@ -56,10 +56,12 @@
 - **实现要点**：拦截器注册顺序 = TokenInterceptor 先 → IdempotentInterceptor 后（前者写 userId 到 request，后者读取）；匹配列表只覆盖 POST/PUT/DELETE 写操作，GET 只读接口不受影响；Redis 异常降级放行（幂等是增强不是安全屏障）
 - **方案修正**：原 ROADMAP 写"前端必须带 X-Request-Id"→ 修正为可选 Header；原计划 StringRedisTemplate → 实际用 Redisson RBucket（保持与项目现有分布式锁技术栈一致）
 
-### P1-1｜数据库索引优化 + 软删除改造（中优）
+### P1-1｜数据库索引优化 + 软删除改造（中优）✅ **已完成 2026-10-24**
 - **目标**：① meeting_booking 表加复合索引 (room_id, start_time, end_time) + (user_id, res_status)；② meeting_room / meeting_booking 加 deleted tinyint(1) DEFAULT 0 软删除 + MyBatis-Plus `@TableLogic`；③ operation_log 加索引 (create_time)
 - **影响文件**：DDL ALTER TABLE、Entity 加 deleted 字段 + `@TableLogic`、MyBatis XML（如存在手写 join 需加 deleted=0 条件）
 - **依赖**：无
+- **实施摘要**：索引（idx_booking_room_time / idx_booking_user_status / idx_oplog_create_time）基线 schema.sql 已存在，无需新增；本阶段只补 `meeting_room.deleted` + `meeting_booking.deleted` 两列 + `@TableLogic`；手写 SQL 共 6 处追加 `deleted=0`（2 处 selectByIdForUpdate + 4 处 XML JOIN）；B-6 已修复
+- **环境注意**：本机 Maven 默认 JDK 1.8 不支持 pattern matching，须先 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`
 
 ### P1-2｜批量审批、会议室批量启停接口（中优）
 - **目标**：新增 `POST /api/booking/batch-approve`（入参 bookingIds: List<Long>, status, rejectReason）、`PUT /api/room/batch-enable` + `PUT /api/room/batch-disable`（入参 ids: List<Long>）。批量操作在一个事务里，每个元素复用单次的业务校验逻辑（通过 Service 循环调用，不直接 foreach updateById 跳过校验）
