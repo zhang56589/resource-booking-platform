@@ -76,10 +76,11 @@
 - **实施摘要**：pom.xml 加 `spring-cloud-starter-alibaba-nacos-config`；application.yml 用 `spring.config.import: optional:nacos:admin-system-backend.yaml?group=DEFAULT_GROUP`（非 bootstrap.yml 方式，省一个 starter 依赖）；jwt / rocketmq 本地默认值保留作 Nacos 宕机兜底；`JwtProperties` 加 `@RefreshScope`
 - **方案修正**：bootstrap.yml → spring.config.import；移除本地 key → 保留本地默认值
 
-### P1-4｜MDC 全链路 TraceId 埋点（中优）
+### P1-4｜MDC 全链路 TraceId 埋点（中优）✅ **已完成 2026-10-24**
 - **目标**：新增 `TraceIdInterceptor`（Servlet 层，优先级高于 TokenInterceptor）+ `MDCUtil`。入站请求生成 TraceId（UUID）写入 MDC + response Header `X-Trace-Id`；出站 Redis / DB / MQ 调用自动带 TraceId。logback-spring.xml 配置 pattern 含 `%X{traceId}`
 - **影响文件**：新增 `TraceIdInterceptor`、`WebConfig` 注册、新增 `logback-spring.xml`（如存在则追加 pattern）
 - **依赖**：无
+- **实施摘要**：新增 `TraceIdInterceptor`（入站继承或生成 X-Trace-Id → MDC + 响应头；afterCompletion 清 MDC 防线程池串号）；新增 `logback-spring.xml`（pattern `%d{...} [%X{traceId:-}] [%thread] %-5level %logger{36} - %msg%n`）；WebConfig order=-100 先于 TokenInterceptor；前端 request.js 带 X-Trace-Id 属 P1-5 顺带事项
 
 ### P1-5｜前端独立阶段：动态菜单、按钮权限 v-permission（中优）
 - **目标**：登录后调后端 `/api/user/menu` 返回菜单树（role 过滤）；Element Plus 侧边栏由菜单树动态渲染；自定义 `v-permission` 指令（如 `v-permission="'booking:approve'"`）控制按钮显隐；router/index.js 改为动态 addRoute

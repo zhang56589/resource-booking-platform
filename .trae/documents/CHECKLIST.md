@@ -173,12 +173,12 @@
 ## 阶段 P1-4｜MDC 全链路 TraceId 埋点 验收清单
 
 ### 变更：新增 TraceIdInterceptor + MDC + logback pattern
-- [ ] 新增 `TraceIdInterceptor`（implements HandlerInterceptor）：preHandle 里生成 UUID traceId → `MDC.put("traceId", traceId)` → `response.setHeader("X-Trace-Id", traceId)`；afterCompletion 里 `MDC.clear()`
-- [ ] WebConfig 注册 TraceIdInterceptor，order=-100（优先级高于 TokenInterceptor）
-- [ ] logback-spring.xml 或 application.yml logging.pattern.console 加 `%X{traceId:-}`
-- [ ] 入站请求 Header 自动带 X-Trace-Id（前端 request.js 加拦截器）
-- [ ] 日志格式：`2026-10-24 17:00:00 [abc-123-def] INFO ...` 中括号里是 traceId
-- [ ] 编译通过
+- [x] 新增 `TraceIdInterceptor`（implements HandlerInterceptor）：preHandle 继承或生成 UUID traceId → `MDC.put("traceId", traceId)` → `response.setHeader("X-Trace-Id", traceId)`；afterCompletion 里 `MDC.clear()`
+- [x] WebConfig 注册 TraceIdInterceptor，order=-100（优先级高于 TokenInterceptor，401 拒绝日志也带 traceId）
+- [x] 新增 `logback-spring.xml`，console pattern 含 `%X{traceId:-}`
+- [ ] 入站请求 Header 自带 X-Trace-Id 则继承（前端 request.js 拦截器属 P1-5 顺带事项，本阶段不动前端）
+- [ ] 日志格式验证：`2026-10-24 17:00:00 [abc123...] [thread] INFO ...` 中括号里是 traceId
+- [x] 编译通过：`mvn -q compile` exit_code=0（需 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`）
 - [ ] 全量冒烟回归：20 步全部通过
 - [ ] 验证：两个并发预约请求日志中 traceId 不同，同一条业务链路日志 traceId 相同
 

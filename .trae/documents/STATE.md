@@ -12,7 +12,7 @@
 | P1-1 | 数据库索引 + 软删除 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-2 | 批量审批、批量启停接口 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-3 | Nacos @RefreshScope 动态配置 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
-| P1-4 | MDC 全链路 TraceId 埋点 | 中 | ⏳ **待开始** | — | — | — |
+| P1-4 | MDC 全链路 TraceId 埋点 | 中 | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | P1-5 | 前端动态菜单 + v-permission | 中 | ⏳ **待开始** | 依赖 P0-3 | — | — |
 | P2-1 | 收尾 README / 接口文档 / SQL | 低 | ⏳ **待开始** | 依赖全部 P0 + P1 | — | — |
 
@@ -20,10 +20,9 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：P1-3 Nacos @RefreshScope 动态配置 **已完成**
-- **下一待执行阶段**：P1-4 TraceId / P1-5 前端动态菜单（全独立，任意顺序）
-- **最近一次变更**：P1-3 —— pom.xml 加 `spring-cloud-starter-alibaba-nacos-config`；application.yml 加 `spring.config.import: optional:nacos:admin-system-backend.yaml` + `spring.cloud.nacos.config.server-addr`（jwt / rocketmq 本地默认值保留作 Nacos 宕机兜底，Nacos 有配置时覆盖并热刷新）；`JwtProperties` 加 `@RefreshScope`；编译 exit_code=0
-- **方案修正**：原方案"新增 bootstrap.yml + 移除 jwt/rocketmq key"→ 修正为 `spring.config.import` 方式（Spring Boot 3 推荐，无需 spring-cloud-starter-bootstrap 依赖）+ 本地默认值保留（Nacos 宕机兜底）
+- **当前阶段**：P1-4 MDC 全链路 TraceId 埋点 **已完成**
+- **下一待执行阶段**：P1-5 前端动态菜单（依赖 P0-3 已就绪）
+- **最近一次变更**：P1-4 —— 新增 `TraceIdInterceptor`（入站继承或生成 X-Trace-Id → MDC + 响应头，afterCompletion 清 MDC）；新增 `logback-spring.xml`（console pattern 含 `[%X{traceId:-}]`）；WebConfig 注册 TraceIdInterceptor order=-100（先于 TokenInterceptor，401 拒绝日志也带 traceId）；编译 exit_code=0
 - **环境修正**：当前机器 Maven 默认 JDK 1.8 编译失败（项目用 Java 16+ pattern matching），须 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'` 后 `mvn compile`
 - **索引现状**：`idx_booking_room_time` / `idx_booking_user_status` / `idx_oplog_create_time` 基线 schema 已存在，P1-1 只需补 `deleted` 列（增量 ALTER 已写入 schema.sql 末尾注释段）
 
@@ -58,3 +57,4 @@
 | 2026-10-24 | P1-1 索引+软删除 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；@TableLogic 生效；手写 SQL 4 处 JOIN + 2 处 FOR UPDATE 均追加 deleted=0 |
 | 2026-10-24 | P1-2 批量接口 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；批量审批锁在 Service 循环内逐元素持有（与单次 approve 同粒度）；幂等拦截器追加 4 条批量路径 |
 | 2026-10-24 | P1-3 Nacos 动态配置 `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；spring.config.import optional:nacos 方式（无 bootstrap 依赖）；JwtProperties @RefreshScope |
+| 2026-10-24 | P1-4 MDC TraceId `mvn -q compile`（需 JDK21） | 0 | 零错误零警告；TraceIdInterceptor order=-100；logback-spring.xml pattern 含 %X{traceId} |

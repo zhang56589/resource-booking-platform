@@ -2,6 +2,7 @@ package com.example.adminsystem.config;
 
 import com.example.adminsystem.interceptor.IdempotentInterceptor;
 import com.example.adminsystem.interceptor.TokenInterceptor;
+import com.example.adminsystem.interceptor.TraceIdInterceptor;
 import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -16,8 +17,16 @@ public class WebConfig implements WebMvcConfigurer {
     @Resource
     private IdempotentInterceptor idempotentInterceptor;
 
+    @Resource
+    private TraceIdInterceptor traceIdInterceptor;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // ⓪ TraceIdInterceptor 最先注册（order=-100）：所有日志含 traceId，包括 401 拒绝日志
+        registry.addInterceptor(traceIdInterceptor)
+                .addPathPatterns("/**")
+                .order(-100);
+
         // ① TokenInterceptor 先注册（认证，写 userId 到 request）
         registry.addInterceptor(tokenInterceptor)
                 .addPathPatterns("/**")
