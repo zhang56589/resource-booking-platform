@@ -98,13 +98,28 @@ const fallbackMenus = computed(() =>
       ]
 )
 
+// 以路由表 meta.role 为准，过滤当前角色无权限的菜单，
+// 避免后端 sys_role_menu 映射错配时把员工菜单渲染给管理员（点击后被路由守卫拦截）
+const allowedMenuPaths = computed(() => {
+  const paths = new Set()
+  router.getRoutes().forEach((r) => {
+    if (!r.path.startsWith('/home/')) return
+    if (r.meta && r.meta.role !== undefined && Number(r.meta.role) !== role.value) return
+    paths.add(r.path)
+  })
+  return paths
+})
+
 const menus = computed(() => {
   try {
     const raw = localStorage.getItem('menus')
     if (raw) {
       const list = JSON.parse(raw)
       if (Array.isArray(list) && list.length > 0) {
-        return list.map((m) => ({ path: m.path, title: m.name }))
+        const visible = list
+          .map((m) => ({ path: m.path, title: m.name }))
+          .filter((m) => allowedMenuPaths.value.has(m.path))
+        if (visible.length > 0) return visible
       }
     }
   } catch (e) {
@@ -133,7 +148,11 @@ const menuIcons = {
 }
 
 const handleLogout = async () => {
-  await ElMessageBox.confirm('确定要退出登录吗？', '提示', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm('确定要退出登录吗？', '提示', { type: 'warning' })
+  } catch (e) {
+    return
+  }
   localStorage.removeItem('token')
   localStorage.removeItem('role')
   localStorage.removeItem('userId')

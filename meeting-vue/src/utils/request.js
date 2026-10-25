@@ -11,6 +11,16 @@ const request = axios.create({
 // 防止并发多个 401 触发多次跳转
 let redirecting = false
 
+// 写操作方法集合：后端 IdempotentInterceptor 只对这些请求做幂等校验
+const WRITE_METHODS = ['post', 'put', 'patch', 'delete']
+
+function uuid() {
+  return (
+    (crypto.randomUUID && crypto.randomUUID().replace(/-/g, '')) ||
+    `${Date.now()}${Math.random().toString(16).slice(2)}`
+  )
+}
+
 function clearAuth() {
   localStorage.removeItem('token')
   localStorage.removeItem('role')
@@ -36,6 +46,7 @@ function redirectToLogin(msg) {
 }
 
 // 请求拦截器：自动携带 Authorization: Bearer <token> + X-Trace-Id（P1-4 全链路追踪）
+// 写操作额外携带 X-Request-Id（P0-4 幂等）：后端缺该头会直接放行，防重复提交不会生效
 request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
@@ -43,9 +54,13 @@ request.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
     // 生成 TraceId，后端 TraceIdInterceptor 继承后贯穿该请求全部日志
-    config.headers['X-Trace-Id'] =
-      (crypto.randomUUID && crypto.randomUUID().replace(/-/g, '')) ||
-      `${Date.now()}${Math.random().toString(16).slice(2)}`
+    config.headers['X-Trace-Id'] = uuid()
+    // 幂等键：同一业务动作重放时需复用同一个 id，调用方可显式传入覆盖
+    if (WRITE_METHODS.includes(String(config.method || 'get').toLowerCase())) {
+      if (!config.headers['X-Request-Id']) {
+        config.headers['X-Request-Id'] = uuid()
+      }
+    }
     return config
   },
   (error) => Promise.reject(error)

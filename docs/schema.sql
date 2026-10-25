@@ -244,8 +244,8 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `name`, `path`, `component`, `icon`, 
 
 -- 员工菜单（工作台 + 预约日历 + 我的预约 + 会议室列表）
 INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (0, 7), (0, 8), (0, 1), (0, 2);
--- 管理员菜单（全部）
-INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 7), (1, 8), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
+-- 管理员菜单（工作台 + 预约日历 + 审批/会议室/用户/日志；员工专属菜单 1、2 不授予）
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 7), (1, 8), (1, 3), (1, 4), (1, 5), (1, 6);
 
 -- ========================================================================
 -- P1-1 增量迁移（已存在的库执行本段；新库上方 CREATE TABLE 已含全部字段/索引）
@@ -261,6 +261,9 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 7), (1, 8), (1, 1)
 -- ALTER TABLE `operation_log`   DROP INDEX `idx_oplog_create_time`;
 -- ALTER TABLE `meeting_room`    DROP COLUMN `deleted`;
 -- ALTER TABLE `meeting_booking` DROP COLUMN `deleted`;
+
+-- 菜单可见性修复（存量库执行）：管理员角色不应看到员工专属菜单「我的预约」「会议室列表」
+DELETE FROM `sys_role_menu` WHERE `role_id` = 1 AND `menu_id` IN (1, 2);
 
 -- ========================================================================
 -- v2 内核表（主线0）

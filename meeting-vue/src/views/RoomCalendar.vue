@@ -122,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { getAdminBookingPage, getUserBookingPage } from '@/api/booking'
 
 // 当前登录角色（读取既有 localStorage，不改动原有登录逻辑）
@@ -226,25 +226,49 @@ const uxOpenDetail = (row) => {
 }
 
 // 查询范围：复用后端已有的时间段筛选参数（startTime/endTime，格式 yyyy-MM-dd HH:mm:ss）
+// 后端筛选语义是「完全落在区间内」（start_time >= ? AND end_time <= ?），
+// 所以前后各扩 1 天，避免跨月/跨天预约两个月都查不到；展示仍由 uxBookingsOnDate 按天过滤
+// 后端 pageSize 上限 100，单页取会导致超过 100 条的月份静默丢数据，这里分页拉全量
 const uxFetch = async () => {
   loading.value = true
   try {
     const y = uxMonthDate.value.getFullYear()
     const m = uxMonthDate.value.getMonth()
-    const start = new Date(y, m, 1, 0, 0, 0)
-    const end = new Date(y, m + 1, 0, 23, 59, 59)
+    const start = new Date(y, m, 0, 0, 0, 0)
+    const end = new Date(y, m + 1, 1, 23, 59, 59)
     const pageApi = role.value === 1 ? getAdminBookingPage : getUserBookingPage
-    const res = await pageApi({
-      pageNum: 1,
-      pageSize: 100,
-      startTime: uxFormatDateTime(start),
-      endTime: uxFormatDateTime(end)
-    })
-    bookingList.value = res.data.records || []
+    const all = []
+    let pageNum = 1
+    while (true) {
+      const res = await pageApi({
+        pageNum,
+        pageSize: 100,
+        startTime: uxFormatDateTime(start),
+        endTime: uxFormatDateTime(end)
+      })
+      const records = res.data.records || []
+      all.push(...records)
+      const total = res.data.total || 0
+      // 取满 total / 空页 / 兜底 50 页（5000 条）即停止
+      if (!records.length || all.length >= total || pageNum >= 50) break
+      pageNum += 1
+    }
+    bookingList.value = all
   } finally {
     loading.value = false
   }
 }
+
+// 日视图可选任意日期，但数据只按 currentMonth 拉取；
+// 切到其他月份时同步月份并重新查询，否则日视图会误显示为空
+watch(selectedDate, (val) => {
+  if (!val) return
+  const month = String(val).slice(0, 7)
+  if (month && month !== currentMonth.value) {
+    currentMonth.value = month
+    uxFetch()
+  }
+})
 
 onMounted(uxFetch)
 </script>

@@ -151,7 +151,9 @@ import {
   updateRoom,
   deleteRoom,
   enableRoom,
-  disableRoom
+  disableRoom,
+  batchEnableRooms,
+  batchDisableRooms
 } from '@/api/room'
 import { getAdminBookingPage } from '@/api/booking'
 import { Picture } from '@element-plus/icons-vue'
@@ -197,39 +199,42 @@ const uxBatchToggle = async (nextStatus) => {
     return
   }
   const action = nextStatus === 1 ? '启用' : '禁用'
-  await ElMessageBox.confirm(
-    `确定批量${action}选中的 ${uxSelectedRows.value.length} 个会议室吗？`,
-    '提示',
-    { type: 'warning' }
-  )
+  try {
+    await ElMessageBox.confirm(
+      `确定批量${action}选中的 ${uxSelectedRows.value.length} 个会议室吗？`,
+      '提示',
+      { type: 'warning' }
+    )
+  } catch (e) {
+    return
+  }
   uxBatchLoading.value = true
   try {
-    const results = await Promise.all(
-      uxSelectedRows.value.map((row) =>
-        (nextStatus === 1 ? enableRoom(row.id) : disableRoom(row.id))
-          .then(() => true)
-          .catch(() => false)
-      )
-    )
-    const okCount = results.filter(Boolean).length
-    ElMessage.success(
-      `批量${action}完成：成功 ${okCount} 个，失败 ${results.length - okCount} 个`
-    )
+    const ids = uxSelectedRows.value.map((row) => row.id)
+    // 走批量接口：后端一次请求完成，避免逐条请求出现部分成功
+    const res =
+      nextStatus === 1 ? await batchEnableRooms(ids) : await batchDisableRooms(ids)
+    ElMessage.success(res.msg || `批量${action}成功`)
     loadTable()
+  } catch (err) {
+    // 错误提示由响应拦截器统一处理
   } finally {
     uxBatchLoading.value = false
   }
 }
 
 // 删除前预校验（新增）：查询该会议室是否存在未完结（待审批0 / 已通过1）预约
+// 用 total 判断数量，避免只取前 100 条导致超过 100 条时误判为可删除
 const uxPrecheckAndDelete = async (row) => {
   try {
-    const res = await getAdminBookingPage({ pageNum: 1, pageSize: 100, roomId: row.id })
-    const unfinished = (res.data.records || []).filter(
-      (b) => b.resStatus === 0 || b.resStatus === 1
-    )
-    if (unfinished.length) {
-      ElMessage.warning(`该会议室存在 ${unfinished.length} 条未完结预约，无法删除`)
+    const [pendingRes, passedRes] = await Promise.all([
+      getAdminBookingPage({ pageNum: 1, pageSize: 1, roomId: row.id, resStatus: 0 }),
+      getAdminBookingPage({ pageNum: 1, pageSize: 1, roomId: row.id, resStatus: 1 })
+    ])
+    const unfinished =
+      (pendingRes.data.total || 0) + (passedRes.data.total || 0)
+    if (unfinished > 0) {
+      ElMessage.warning(`该会议室存在 ${unfinished} 条未完结预约，无法删除`)
       return
     }
   } catch (err) {
@@ -302,7 +307,11 @@ const handleToggle = async (row, status) => {
 }
 
 const handleDelete = async (id) => {
-  await ElMessageBox.confirm('确定要删除该会议室吗？', '提示', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm('确定要删除该会议室吗？', '提示', { type: 'warning' })
+  } catch (e) {
+    return
+  }
   try {
     await deleteRoom(id)
     ElMessage.success('删除成功')

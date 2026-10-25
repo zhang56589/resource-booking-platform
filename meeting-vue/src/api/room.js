@@ -34,3 +34,13 @@ export function enableRoom(id) {
 export function disableRoom(id) {
   return request.put(`/room/disable/${id}`)
 }
+
+// 管理员：批量启用 { ids: [] }
+export function batchEnableRooms(ids) {
+  return request.put('/room/batch-enable', { ids })
+}
+
+// 管理员：批量禁用 { ids: [] }
+export function batchDisableRooms(ids) {
+  return request.put('/room/batch-disable', { ids })
+}

@@ -133,7 +133,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getAdminBookingPage, approveBooking } from '@/api/booking'
+import { getAdminBookingPage, approveBooking, batchApproveBooking } from '@/api/booking'
 import { getAvailableRoomList } from '@/api/room'
 
 const loading = ref(false)
@@ -195,25 +195,26 @@ const uxBatchApprove = async () => {
     ElMessage.warning('请勾选待审批的预约记录')
     return
   }
-  await ElMessageBox.confirm(
-    `确定批量通过选中的 ${pending.length} 条待审批预约吗？`,
-    '提示',
-    { type: 'warning' }
-  )
+  try {
+    await ElMessageBox.confirm(
+      `确定批量通过选中的 ${pending.length} 条待审批预约吗？`,
+      '提示',
+      { type: 'warning' }
+    )
+  } catch (e) {
+    return
+  }
   uxBatchLoading.value = true
   try {
-    const results = await Promise.all(
-      pending.map((r) =>
-        approveBooking({ bookingId: r.id, status: 1 })
-          .then(() => true)
-          .catch(() => false)
-      )
-    )
-    const okCount = results.filter(Boolean).length
-    ElMessage.success(
-      `批量审批完成：成功 ${okCount} 条，失败 ${pending.length - okCount} 条`
-    )
+    // 走批量接口：后端在一个事务内逐条加锁，避免逐条请求出现部分成功
+    const res = await batchApproveBooking({
+      bookingIds: pending.map((r) => r.id),
+      status: 1
+    })
+    ElMessage.success(res.msg || `批量通过 ${pending.length} 条预约`)
     loadTable()
+  } catch (err) {
+    // 错误提示由响应拦截器统一处理（整批失败会整体回滚）
   } finally {
     uxBatchLoading.value = false
   }
@@ -246,9 +247,13 @@ const handleSizeChange = () => {
 }
 
 const handlePass = async (row) => {
-  await ElMessageBox.confirm(`确定通过「${row.roomName}」的预约吗？`, '提示', {
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定通过「${row.roomName}」的预约吗？`, '提示', {
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
   try {
     await approveBooking({ bookingId: row.id, status: 1 })
     ElMessage.success('审批通过')

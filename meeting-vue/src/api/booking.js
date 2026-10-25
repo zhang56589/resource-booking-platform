@@ -20,6 +20,11 @@ export function approveBooking(data) {
   return request.post('/booking/approve', data)
 }
 
+// 管理员：批量审批 { bookingIds, status, rejectReason }，后端一个事务内逐条加锁
+export function batchApproveBooking(data) {
+  return request.post('/booking/batch-approve', data)
+}
+
 // 员工：取消预约（后端支持 待审批0 / 已通过1；会议已开始则不可取消）
 export function cancelBooking(id) {
   return request.delete(`/booking/cancel/${id}`)

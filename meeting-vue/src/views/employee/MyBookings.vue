@@ -205,7 +205,11 @@ const handleSizeChange = () => {
 }
 
 const handleCancel = async (id) => {
-  await ElMessageBox.confirm('确定要取消该预约吗？', '提示', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm('确定要取消该预约吗？', '提示', { type: 'warning' })
+  } catch (e) {
+    return
+  }
   try {
     await cancelBooking(id)
     ElMessage.success('取消成功')

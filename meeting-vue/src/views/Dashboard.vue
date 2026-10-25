@@ -87,16 +87,31 @@ const uxTodayRange = () => {
   return { startTime: uxFormatDateTime(start), endTime: uxFormatDateTime(end) }
 }
 
+// 后端 /room/page 的 pageSize 上限为 100，单页统计会在会议室超过 100 个时少算
+const uxCountEnabledRooms = async () => {
+  let pageNum = 1
+  let enabled = 0
+  while (true) {
+    const res = await getRoomPage({ pageNum, pageSize: 100 })
+    const records = res.data.records || []
+    enabled += records.filter((r) => r.status === 1).length
+    const total = res.data.total || 0
+    if (!records.length || pageNum * 100 >= total || pageNum >= 50) break
+    pageNum += 1
+  }
+  return enabled
+}
+
 const uxLoadAdminStat = async () => {
   const today = uxTodayRange()
-  const [totalRes, listRes, todayRes, pendingRes] = await Promise.all([
+  const [totalRes, roomsEnabled, todayRes, pendingRes] = await Promise.all([
     getRoomPage({ pageNum: 1, pageSize: 1 }),
-    getRoomPage({ pageNum: 1, pageSize: 100 }),
+    uxCountEnabledRooms(),
     getAdminBookingPage({ pageNum: 1, pageSize: 1, ...today }),
     getAdminBookingPage({ pageNum: 1, pageSize: 1, resStatus: 0 })
   ])
   stat.roomsTotal = totalRes.data.total || 0
-  stat.roomsEnabled = (listRes.data.records || []).filter((r) => r.status === 1).length
+  stat.roomsEnabled = roomsEnabled
   stat.todayBookings = todayRes.data.total || 0
   stat.pendingBookings = pendingRes.data.total || 0
 }

@@ -31,10 +31,10 @@
     <el-dialog v-model="dialogVisible" title="提交预约" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="会议室">
-          <el-input :value="form.roomName" disabled />
+          <el-input :model-value="form.roomName" disabled />
         </el-form-item>
         <el-form-item label="申请人">
-          <el-input :value="uxCurrentUser" disabled />
+          <el-input :model-value="uxCurrentUser" disabled />
         </el-form-item>
         <el-form-item label="预约时间" prop="timeRange">
           <el-date-picker

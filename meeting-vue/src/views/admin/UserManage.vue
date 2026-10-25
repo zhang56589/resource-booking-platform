@@ -63,7 +63,7 @@
     <el-dialog v-model="roleDialogVisible" title="修改角色" width="400px">
       <el-form label-width="80px">
         <el-form-item label="账号">
-          <el-input :value="currentUser.username" disabled />
+          <el-input :model-value="currentUser.username" disabled />
         </el-form-item>
         <el-form-item label="角色">
           <el-select v-model="roleForm.role" style="width: 100%">
@@ -84,7 +84,7 @@
     <el-dialog v-model="resetDialogVisible" title="重置密码" width="400px">
       <el-form ref="resetFormRef" :model="resetForm" :rules="resetRules" label-width="80px">
         <el-form-item label="账号">
-          <el-input :value="currentUser.username" disabled />
+          <el-input :model-value="currentUser.username" disabled />
         </el-form-item>
         <el-form-item label="新密码" prop="password">
           <el-input
@@ -175,9 +175,13 @@ const submitRole = async () => {
 const handleToggleStatus = async (row) => {
   const next = row.enabled === 1 ? 0 : 1
   const action = next === 1 ? '启用' : '禁用'
-  await ElMessageBox.confirm(`确定要${action}账号「${row.username}」吗？`, '提示', {
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定要${action}账号「${row.username}」吗？`, '提示', {
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
   try {
     await updateUserStatus({ id: row.id, enabled: next })
     ElMessage.success(`${action}成功`)
