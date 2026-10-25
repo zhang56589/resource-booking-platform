@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.adminsystem.mapper.ScheduleBookingMapper">
+
+    <resultMap id="ScheduleBookingVOResultMap" type="com.example.adminsystem.vo.BookingVO">
+        <id column="id" property="id"/>
+        <result column="room_id" property="roomId"/>
+        <result column="room_name" property="roomName"/>
+        <result column="user_id" property="userId"/>
+        <result column="username" property="username"/>
+        <result column="start_time" property="startTime"/>
+        <result column="end_time" property="endTime"/>
+        <result column="status" property="resStatus"/>
+        <result column="reject_reason" property="rejectReason"/>
+        <result column="title" property="title"/>
+        <result column="reason" property="reason"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <sql id="BookingVOColumns">
+        sb.id,
+        CAST(JSON_UNQUOTE(JSON_EXTRACT(ri.attributes_json, '$.legacyRoomId')) AS UNSIGNED) AS room_id,
+        ri.instance_name AS room_name,
+        sb.user_id,
+        su.username,
+        sb.start_time,
+        sb.end_time,
+        sb.status,
+        JSON_UNQUOTE(JSON_EXTRACT(sb.ext_json, '$.rejectReason')) AS reject_reason,
+        JSON_UNQUOTE(JSON_EXTRACT(sb.ext_json, '$.title')) AS title,
+        JSON_UNQUOTE(JSON_EXTRACT(sb.ext_json, '$.reason')) AS reason,
+        sb.create_time
+    </sql>
+
+    <sql id="BookingVOJoins">
+        FROM schedule_booking sb
+        LEFT JOIN resource_instance ri ON sb.resource_instance_id = ri.id
+        LEFT JOIN sys_user su ON sb.user_id = su.id
+    </sql>
+
+    <select id="selectBookingVOPage" resultMap="ScheduleBookingVOResultMap">
+        SELECT
+        <include refid="BookingVOColumns"/>
+        <include refid="BookingVOJoins"/>
+        <where>
+            sb.deleted = 0
+            <if test="dto != null and dto.roomId != null">
+                AND ri.instance_code = CONCAT('ROOM_', #{dto.roomId})
+            </if>
+            <if test="dto != null and dto.resStatus != null">
+                AND sb.status = #{dto.resStatus}
+            </if>
+            <if test="dto != null and dto.startTime != null">
+                AND sb.start_time &gt;= #{dto.startTime}
+            </if>
+            <if test="dto != null and dto.endTime != null">
+                AND sb.end_time &lt;= #{dto.endTime}
+            </if>
+        </where>
+        ORDER BY sb.create_time DESC
+    </select>
+
+    <select id="selectUserBookingVOPage" resultMap="ScheduleBookingVOResultMap">
+        SELECT
+        <include refid="BookingVOColumns"/>
+        <include refid="BookingVOJoins"/>
+        <where>
+            sb.deleted = 0
+            AND sb.user_id = #{userId}
+            <if test="dto != null and dto.roomId != null">
+                AND ri.instance_code = CONCAT('ROOM_', #{dto.roomId})
+            </if>
+            <if test="dto != null and dto.resStatus != null">
+                AND sb.status = #{dto.resStatus}
+            </if>
+            <if test="dto != null and dto.startTime != null">
+                AND sb.start_time &gt;= #{dto.startTime}
+            </if>
+            <if test="dto != null and dto.endTime != null">
+                AND sb.end_time &lt;= #{dto.endTime}
+            </if>
+        </where>
+        ORDER BY sb.create_time DESC
+    </select>
+
+</mapper>

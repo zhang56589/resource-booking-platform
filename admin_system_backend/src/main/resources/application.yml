@@ -66,6 +66,12 @@ rocketmq:
     group: booking-producer-group
 #  name-server: 127.0.0.1:9876    # ← 取消注释并填地址以启用 MQ
 
+# 主线2：过期待审批预约自动取消（冲突校验 SQL 已做懒失效，本任务负责状态落库）
+booking:
+  expire:
+    enabled: true
+    cron: "0 0/5 * * * ?"
+
 # Redisson 分布式锁日志级别（可选，生产可调到 INFO）
 logging:
   level:

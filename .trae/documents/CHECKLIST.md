@@ -43,7 +43,7 @@
 > 2026-10-25 主线0 回归说明：本阶段零 Java/接口变更，已执行只读子集（#1 未登录 401、#2/#3 登录、#5 越权 403、#6 会议室列表、管理员/用户分页）；#7-#20 写路径沿用 v1 2026-10-24 全绿记录，本次未重复执行以避免污染演示数据。
 
 ### 3 步内核冒烟（按依赖阶段生效）
-- [x] 内核表数据与老表一致：2026-10-25 实测 `schedule_booking=8` = `meeting_booking=8`，`schedule_booking_item=8`（主线2 切换后需再校验一次）
+- [x] 内核表数据与老表一致：2026-10-25 实测 `schedule_booking=8` = `meeting_booking=8`，`schedule_booking_item=8`（主线2 已在临时库再次校验切换后读写均走新表）
 - [x] 日志无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`（2026-10-25 8081 启动日志 `PluginRegistry count=0`，无 Bean 装配异常）
 - [ ] 幂等拦截覆盖新接口：`POST /api/schedule/book` 带相同 X-Request-Id 第二次 400（依赖主线4 新增接口）
 
@@ -108,18 +108,31 @@
 
 ## 四、主线2｜TimeExclusivePlugin 迁移验收清单
 
-- [ ] submit 锁 key = `schedule:room:{instanceId}`；approve 锁 key = `schedule:approve:{bookingId}`（双粒度保留）
-- [ ] 冲突校验迁入插件，SQL 查 `schedule_booking`：deleted=0 AND status IN (0,1) AND start_time < :end AND end_time > :start
-- [ ] `EXPLAIN` 命中 `idx_schedule_instance_time`
-- [ ] 审批/取消仍走 `resource_instance` + `schedule_booking` 行 FOR UPDATE
-- [ ] 过期释放：start_time < now 的 PENDING 不参与冲突；定时任务置过期 PENDING 为取消（可开关）
-- [ ] 时间边界：startTime = endTime → 400；startTime < now → 400
-- [ ] `MeetingBookingServiceImpl` 改为委托 ScheduleManager，public 方法签名不变
-- [ ] `MeetingBookingController` 对外 URL / 入参 / 返回不变（锁 key 来源改为插件）
-- [ ] 老表停写，新表为唯一数据源（切换时点明确记录）
-- [ ] 并发预约：Redisson 锁串行化，一个 200 / 一个 400
-- [ ] `mvn -q compile` exit 0
-- [ ] 全量 20 步冒烟通过 + 内核冒烟 3 步通过
+- [x] submit 锁 key = `schedule:room:{instanceId}`；approve 锁 key = `schedule:approve:{bookingId}`（双粒度保留）
+- [x] 冲突校验迁入插件，SQL 查 `schedule_booking`：deleted=0 AND status IN (0,1) AND start_time < :end AND end_time > :start
+- [x] `EXPLAIN` 命中 `idx_schedule_instance_time`
+- [x] 审批/取消仍走 `resource_instance` + `schedule_booking` 行 FOR UPDATE
+- [x] 过期释放：start_time < now 的 PENDING 不参与冲突；定时任务置过期 PENDING 为取消（可开关）
+- [x] 时间边界：startTime = endTime → 400；startTime < now → 400
+- [x] `MeetingBookingServiceImpl` 改为委托 ScheduleManager，public 方法签名不变
+- [x] `MeetingBookingController` 对外 URL / 入参 / 返回不变（锁 key 来源改为插件）
+- [x] 老表停写，新表为唯一数据源（切换时点明确记录）
+- [x] 并发预约：Redisson 锁串行化，一个 200 / 一个 400
+- [x] `mvn -q compile` exit 0
+- [x] 全量 20 步冒烟通过 + 内核冒烟 3 步通过 —— 在临时库 `admin_system_m2_test` + Redis DB1 执行 36 项全绿
+
+### 实施记录（2026-10-25 已完成）
+- [x] 新增实体 3 / Mapper 4 + XML 1；新增 `ScheduleActionEnum` / `BookingOutboxWriter` / `TimeExclusivePlugin` / `BookingExpireScheduler`
+- [x] 修改 `MeetingBookingController`（锁 key + instanceId 解析）、`MeetingBookingServiceImpl`（薄门面、查询切新表）、`MeetingRoomServiceImpl`（镜像写 + 删除校验）、`ScheduleTxServiceImpl`（REJECT）、`application.yml`
+- [x] `docs/mainline2_index.sql` 幂等索引已在 `admin_system` 执行；校验 5 条索引全部存在
+- [x] 单测 24/24（新增 `TimeExclusivePluginTest` 6、`BookingOutboxWriterTest` 3；更新 `ScheduleTxServiceImplTest`）
+- [x] `mvn clean package -DskipTests` exit 0
+- [x] 临时库冒烟覆盖：登录/RBAC、提交/重复/抢占、审批通过/重复/驳回/驳回原因回显/驳回后释放、取消/重复/越权、时间校验、会议室新增镜像/删除/拦截、禁用不可约、并发恰好 1 成功、批量审批、过期自动取消
+- [x] 切换时点：老表 `meeting_booking` 自本阶段起停写；`meeting_room` 仅作对外 roomId 主数据源
+- [x] 红线文件零改动
+
+### 验收标记
+- [x] 状态更新为【已完成】，ROADMAP/STATE/CHECKLIST 三份文档同步；等待用户验收，不自动进入主线3
 
 ---
 

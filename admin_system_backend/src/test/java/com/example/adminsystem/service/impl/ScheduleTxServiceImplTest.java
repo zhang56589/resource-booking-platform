@@ -15,7 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class ScheduleTxServiceImplTest {
@@ -49,13 +48,16 @@ class ScheduleTxServiceImplTest {
     }
 
     @Test
-    void approve_reject_shouldSkipHooks() {
+    void approve_reject_shouldValidateThenOnRejected() {
         ScheduleContext ctx = new ScheduleContext();
         ctx.setTargetStatus(BookingStatusEnum.REJECT.getCode());
 
         service.approve(ctx, plugin);
 
-        verifyNoInteractions(plugin);
+        InOrder order = inOrder(plugin);
+        order.verify(plugin).validate(ctx);
+        order.verify(plugin).onRejected(ctx);
+        verify(plugin, never()).onBooked(ctx);
     }
 
     @Test
@@ -66,7 +68,7 @@ class ScheduleTxServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> service.approve(ctx, plugin));
 
         assertEquals(400, ex.getCode().intValue());
-        verifyNoInteractions(plugin);
+        verify(plugin).validate(ctx);
     }
 
     @Test

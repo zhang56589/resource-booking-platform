@@ -16,12 +16,21 @@ public class ScheduleContext {
     /** 资源类型编码，插件路由依据 */
     private String typeCode;
 
+    /** 调度动作：BOOK / APPROVE / CANCEL */
+    private ScheduleActionEnum action;
+
     private Long resourceTypeId;
 
     private Long resourceInstanceId;
 
     /** 资源实例编码，时段/明细类插件常用 */
     private String instanceCode;
+
+    /** 资源实例名称，用于通知与查询 */
+    private String instanceName;
+
+    /** 会议室场景下对应的 meeting_room.id，其他资源类型可为空 */
+    private Long roomId;
 
     private Long userId;
 
@@ -34,6 +43,14 @@ public class ScheduleContext {
 
     /** 预约单 ID：提交时为空，审批/取消时必填 */
     private Long bookingId;
+
+    /** 会议主题 / 申请理由 */
+    private String title;
+
+    private String reason;
+
+    /** 提交人登录名，用于通知 payload */
+    private String username;
 
     /** 审批人 ID */
     private Long adminId;

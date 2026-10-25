@@ -30,15 +30,16 @@ public class ScheduleTxServiceImpl implements ScheduleTxService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void approve(ScheduleContext ctx, ScheduleRulePlugin plugin) {
+        plugin.validate(ctx);
         Integer targetStatus = ctx.getTargetStatus();
         if (BookingStatusEnum.PASS.getCode().equals(targetStatus)) {
-            plugin.validate(ctx);
             plugin.onBooked(ctx);
             log.info("调度审批通过 typeCode={}, bookingId={}, plugin={}",
                     ctx.getTypeCode(), ctx.getBookingId(), plugin.pluginCode());
             return;
         }
         if (BookingStatusEnum.REJECT.getCode().equals(targetStatus)) {
+            plugin.onRejected(ctx);
             log.info("调度审批驳回 typeCode={}, bookingId={}", ctx.getTypeCode(), ctx.getBookingId());
             return;
         }

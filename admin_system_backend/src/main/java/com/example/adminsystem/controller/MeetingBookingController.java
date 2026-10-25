@@ -31,8 +31,8 @@ import java.util.concurrent.TimeUnit;
  * cancelBooking 不走分布式锁：DB FOR UPDATE 行锁 + 业务前置校验已足够。
  *
  * ======== 锁粒度说明 ========
- *   submitBooking —— 会议室粒度（booking:room:{roomId}）：串行化同房间所有时段的并发提交请求，防止同时段冲突。
- *   approve       —— 预约单粒度（booking:approve:{bookingId}）：串行化同一个 bookingId 的并发审批请求；
+ *   submitBooking —— 资源实例粒度（schedule:room:{instanceId}）：串行化同会议室所有时段的并发提交请求，防止同时段冲突。
+ *   approve       —— 预约单粒度（schedule:approve:{bookingId}）：串行化同一个 bookingId 的并发审批请求；
  *                     不同 bookingId 但同房间的审批不再互斥，DB FOR UPDATE 行锁 + PENDING 状态校验兜底。
  */
 @Slf4j
@@ -41,10 +41,10 @@ import java.util.concurrent.TimeUnit;
 public class MeetingBookingController {
 
     /** ====== 分布式锁配置（P0-1：submit 保持会议室粒度，approve 改为预约单粒度） ====== */
-    /** submitBooking 锁：会议室粒度，串行化同房间所有时段的预约提交请求 */
-    private static final String LOCK_KEY_ROOM = "booking:room:";
+    /** submitBooking 锁：资源实例粒度，串行化同会议室所有时段的预约提交请求 */
+    private static final String LOCK_KEY_ROOM = "schedule:room:";
     /** approve 锁：预约单粒度，串行化同一个 bookingId 的并发审批请求 */
-    private static final String LOCK_KEY_APPROVE = "booking:approve:";
+    private static final String LOCK_KEY_APPROVE = "schedule:approve:";
     private static final long LOCK_WAIT_SECONDS = 5L;
     private static final long LOCK_LEASE_TIME = -1L; // Redisson watch dog 自动续期
 
@@ -73,7 +73,9 @@ public class MeetingBookingController {
         }
 
         // ====== 分布式锁（锁包事务） ======
-        String lockKey = LOCK_KEY_ROOM + dto.getRoomId();
+        // 锁 key 使用资源实例 ID（与内核 ScheduleManager 的 BOOK 锁 key 一致，可重入）
+        Long instanceId = meetingBookingService.getInstanceIdByRoomId(dto.getRoomId());
+        String lockKey = LOCK_KEY_ROOM + instanceId;
         RLock rLock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {
@@ -161,7 +163,7 @@ public class MeetingBookingController {
     }
 
     /**
-     * P1-2 批量审批：锁在 Service 循环内逐元素持有（booking:approve:{bookingId}），
+     * P1-2 批量审批：锁在 Service 循环内逐元素持有（schedule:approve:{bookingId}），
      * 一个事务内全部成功或整体回滚，错误信息带第一个失败的 bookingId 和原因。
      */
     @RequireAdmin(message = "无权限，仅管理员可以执行审批操作")

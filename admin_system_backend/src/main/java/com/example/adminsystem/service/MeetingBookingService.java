@@ -1,15 +1,13 @@
 package com.example.adminsystem.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.adminsystem.dto.ApproveBookingDTO;
 import com.example.adminsystem.dto.BookingBatchApproveDTO;
 import com.example.adminsystem.dto.BookingDTO;
 import com.example.adminsystem.dto.BookingQueryDTO;
-import com.example.adminsystem.entity.MeetingBooking;
 import com.example.adminsystem.vo.BookingVO;
 
-public interface MeetingBookingService extends IService<MeetingBooking> {
+public interface MeetingBookingService {
 
     void submitBooking(Long userId, BookingDTO dto);
 
@@ -37,9 +35,8 @@ public interface MeetingBookingService extends IService<MeetingBooking> {
     Page<BookingVO> userQueryPage(Integer pageNum, Integer pageSize, BookingQueryDTO dto, Long userId);
 
     /**
-     * 仅用于 Controller 层分布式锁 key 构造：根据预约ID拿到所属会议室ID。
-     * 注意：这是一个非事务的只读查询，且不带 FOR UPDATE，
-     * 因为它发生在分布式锁抢锁之前，只需要拿到 roomId 来构造锁 key 即可。
+     * 仅用于 Controller 层分布式锁 key 构造：根据会议室ID拿到资源实例ID。
+     * 发生在抢锁之前，只读、不带 FOR UPDATE。
      */
-    Long getRoomIdOfBooking(Long bookingId);
+    Long getInstanceIdByRoomId(Long roomId);
 }

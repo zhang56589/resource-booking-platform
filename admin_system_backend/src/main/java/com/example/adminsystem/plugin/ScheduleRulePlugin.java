@@ -21,6 +21,10 @@ public interface ScheduleRulePlugin {
     /** 预约生效后的资源侧动作，事务内执行 */
     void onBooked(ScheduleContext ctx);
 
+    /** 审批驳回后的资源侧动作，事务内执行；默认空实现，配额类插件可按需覆盖 */
+    default void onRejected(ScheduleContext ctx) {
+    }
+
     /** 取消后的归还动作，事务内执行 */
     void onCancelled(ScheduleContext ctx);
 }

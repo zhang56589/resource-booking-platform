@@ -89,7 +89,7 @@
   - 8081 实例登录 200、会议室列表 200；验证后已关闭
   - 老接口零改动；20 步写路径沿用 v1 2026-10-24 全绿记录
 
-### 主线2｜TimeExclusivePlugin：迁移时间冲突校验 + 分布式锁 + 过期释放 ｜【待开始】
+### 主线2｜TimeExclusivePlugin：迁移时间冲突校验 + 分布式锁 + 过期释放 ｜【已完成】
 
 - **目标范围**：把老会议室逻辑完整搬进插件，老 Service 改为委托；对外接口不变
 - **迁移内容**
@@ -102,6 +102,22 @@
 - **风险**：① 双写期数据不一致 → 主线 2 起老表停写、新表统一切换，切换前跑迁移脚本；② 冲突 SQL 走错索引 → 强制命中 `(resource_instance_id, start_time, end_time)`；③ 锁 key 变化导致灰度期间互斥失效 → 单实例部署，无灰度
 - **回滚**：git 还原 Service/Controller，插件包删除，数据仍在老表（老表只读未删）
 - **依赖**：主线 1
+- **方案输出（2026-10-25，未改代码）**：
+  - 为使主线2 的 20 步冒烟可执行，本阶段同时切换 `GET /api/booking/*` 查询到 `schedule_booking`，并适配批量审批；主线3 聚焦 outbox 消费者/字段兼容与全量回归
+  - 会议室主数据仍以 `meeting_room` 为对外 ID 源，`MeetingRoomServiceImpl` 增补对 `resource_instance` 的镜像写，避免新表与房间 CRUD 脱节
+  - 单次 submit/approve 的 Service 改为薄门面（不开启事务），锁与事务统一由 `ScheduleManager → ScheduleTxService` 编排；outbox 移入插件事务，保证与预约写入原子提交
+  - 新增 `docs/mainline2_index.sql`：`schedule_booking(status, start_time)` 索引，支撑过期 PENDING 清理
+  - 20 步冒烟在临时库 `admin_system_m2_test` + Redis DB 1 上执行，验证后销毁，不污染演示数据
+- **实施记录（2026-10-25 已完成）**：
+  - 新增实体 3 个：`ScheduleBooking` / `ScheduleBookingItem` / `ResourceInstance`
+  - 新增 Mapper 4 个：`ResourceTypeMapper` / `ResourceInstanceMapper` / `ScheduleBookingMapper` / `ScheduleBookingItemMapper`，以及 `resources/mapper/ScheduleBookingMapper.xml`
+  - 新增内核实现：`plugin/ScheduleActionEnum`、`plugin/support/BookingOutboxWriter`、`plugin/impl/TimeExclusivePlugin`
+  - 修改：`ScheduleRulePlugin`（+`onRejected`）、`ScheduleContext`（+action/roomId/title/reason/username/instanceName）、`ScheduleTxServiceImpl`（REJECT 分支）、`MeetingBookingService`/`Impl`（薄门面）、`MeetingBookingController`（锁 key `schedule:*`，submit 前解析 instanceId）、`MeetingRoomServiceImpl`（镜像写 + 删除校验切新表）、`application.yml`（booking.expire）
+  - 新增 `scheduler/BookingExpireScheduler`；新增 `docs/mainline2_index.sql`（幂等索引，已在 `admin_system` 执行）
+  - 单测 24/24：新增 `TimeExclusivePluginTest` 6 项、`BookingOutboxWriterTest` 3 项；更新 `ScheduleTxServiceImplTest` REJECT 断言
+  - `mvn clean package -DskipTests` exit 0；临时库冒烟 36 项全绿（含并发抢锁恰好 1 成功、驳回后时段释放、过期自动取消、会议室镜像/删除拦截）
+  - EXPLAIN 冲突查询命中 `idx_schedule_instance_time`（range）
+  - 老表自本阶段起停写：新代码写/读均走 `schedule_booking`，`meeting_room` 仅作为 `roomId` 对外 ID 源
 
 ### 主线3｜审批 / 消息通知 / 可靠消息链路适配 + 会议室全业务回归 ｜【待开始】
 
@@ -111,6 +127,14 @@
 - **风险**：① VO 字段变化破坏前端 → 查询 SQL 别名对齐原 VO；② 历史数据 status 语义差异 → 迁移脚本校验
 - **回滚**：还原 3 个文件 + 查询改回老表
 - **依赖**：主线 2
+- **方案输出（2026-10-25，未改代码）**：
+  - 主线2 已完成 approve/reject/batch-approve 委托、查询切新表、outbox 事务内写入；本阶段收口「可靠消息降级语义 + 字段兼容核验 + 全量回归」
+  - 修复 `OutboxScheduler` 在 MQ 未配置时每 5s 抢占→回退→累加重试直至死信的问题：`rocketMQTemplate == null` 时直接返回，保持 outbox status=0 待发送
+  - payload 与 v1 比对：topic/tag 不变，字段为 v1 超集（submit +roomName/startTime/endTime/operatorId；approve +result/rejectReason/adminId），用单测锁定必需字段
+  - 查询 VO 与 v1 逐字段核对：新增 `id`（=schedule_booking.id），其余 11 字段一致；roomName 改由 resource_instance 提供
+  - `docs/mainline2_index.sql` 追加幂等索引 `(user_id, create_time)`，消除用户分页 filesort（主线2 EXPLAIN 观测项）
+  - 回归：20 步 + 内核 3 步 + X-Request-Id 幂等 + MQ-off outbox 停留 status=0 + 前端 3 步；临时库 `admin_system_m3_test` + Redis DB2，验证后销毁
+
 
 ### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【待开始】
 
@@ -172,7 +196,7 @@
 |---|---|---|---|---|
 | 主线0 | 基线确认 + 数据模型 + 迁移脚本 | 主线 | P0 | 【已完成】 |
 | 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【已完成】 |
-| 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【待开始】 |
+| 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【已完成】 |
 | 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【待开始】 |
 | 主线4 | 工位扩展验证 | 主线 | P0 | 【待开始】 |
 | 加分A | 两级审批模板 | 可选加分 | P1 | 【可选加分｜未开启】 |
