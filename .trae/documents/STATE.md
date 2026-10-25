@@ -6,8 +6,8 @@
 |---|---|---|---|---|---|---|---|
 | v1 | 会议室预约系统 P0-1~P2-1（10 阶段） | 历史基线 | — | ✅ **已完成** | — | 2026-10-24 | 2026-10-24 |
 | 主线0 | 基线确认 + 数据模型 + 老数据迁移脚本 | 主线 | P0 | ✅ **已完成** | SQL 已落盘并验证：迁移/幂等/校验/编译均通过 | 2026-10-25 | 2026-10-25 |
-| 主线1 | 插件接口 + ScheduleManager 调度管理器 | 主线 | P0 | 🔵 **待确认** | 方案已输出，等用户确认 | 2026-10-25 | — |
-| 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | ⏳ **待开始** | 依赖主线1 | — | — |
+| 主线1 | 插件接口 + ScheduleManager 调度管理器 | 主线 | P0 | ✅ **已完成** | 代码/单测/启动验证均通过 | 2026-10-25 | 2026-10-25 |
+| 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | ⏳ **待开始** | 依赖主线1（已满足），等待用户【继续下一阶段】 | — | — |
 | 主线3 | 审批/消息适配 + 会议室全量回归 | 主线 | P0 | ⏳ **待开始** | 依赖主线2 | — | — |
 | 主线4 | 工位扩展验证 | 主线 | P0 | ⏳ **待开始** | 依赖主线3 | — | — |
 | 加分A | 两级可配置审批模板 | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分A】 | — | — |
@@ -19,10 +19,10 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：主线1（内核抽象层：ScheduleRulePlugin + ScheduleManager）
-- **执行状态**：🔵 待确认 —— 方案已输出，未写任何代码、未改任何现有文件
-- **下一步**：等待用户确认指令（`同意方案，开始改代码`）后才进入编码与编译自检
-- **主线串行约束**：主线0 已【已完成】；主线1 标记【已完成】前，禁止启动主线2；主线未全部完成前，禁止启动任何加分分支
+- **当前阶段**：主线1（内核抽象层）已【已完成】；主线2 未启动
+- **执行状态**：✅ 主线1 已完成 —— 等待用户验收或下达下一步指令
+- **下一步**：等待用户指令（`继续下一阶段` / `回滚当前阶段` / `验收主线1`）
+- **主线串行约束**：主线2 必须在用户明确下达【继续下一阶段】后先输出方案、等待确认；主线未全部完成前，禁止启动任何加分分支
 
 ### 主线0 实施结果（2026-10-25 已完成）
 
@@ -34,12 +34,26 @@
 - 编译：`mvn clean package -DskipTests` exit 0
 - 冒烟：登录、会议室列表、管理员/用户分页、未登录 401、越权 403 均符合预期；写路径沿用 v1 2026-10-24 全绿记录
 
-### 本次主线1 方案输出（未改代码）
+### 主线1 实施结果（2026-10-25 已完成）
 
-1. 方案已写入 ROADMAP.md「主线1」章节并标记【待确认】
-2. 设计范围：`ScheduleRulePlugin` / `ScheduleContext` / `PluginRegistry` / `ScheduleManager` / `ScheduleTxService`(+Impl)
-3. 设计约束：不引用新建内核表、不改老 Service/Controller、不改红线文件、锁在事务外
-4. 待用户确认后再编码、写单测、执行编译自检
+新增文件（现有 Java 文件零修改）：
+- `plugin/ScheduleRulePlugin.java`
+- `plugin/ScheduleContext.java`
+- `plugin/PluginRegistry.java`
+- `plugin/ScheduleManager.java`
+- `service/ScheduleTxService.java`
+- `service/impl/ScheduleTxServiceImpl.java`
+- `src/test/.../plugin/ScheduleManagerTest.java`（5 项）
+- `src/test/.../plugin/PluginRegistryTest.java`（4 项）
+- `src/test/.../service/impl/ScheduleTxServiceImplTest.java`（5 项）
+
+验证结果：
+- 单测 14/14 通过
+- `mvn -q package -DskipTests` exit 0
+- 8081 实例启动成功：`PluginRegistry count=0`、`Started AdminSystemBackendApplication`，无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`
+- 8081 实例登录 200、会议室列表 200；验证后已关闭
+- 红线文件（TokenInterceptor / Result / BusinessException / GlobalExceptionHandler）与老 Controller/Service 零改动
+- 20 步写路径未重复执行，沿用 v1 2026-10-24 全绿记录
 
 ### 本次初始化完成事项（未改代码）
 
@@ -68,6 +82,7 @@
 
 - **编译必须 JDK 21**：`$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'; mvn -q compile`（系统默认 JDK 1.8 会编译失败）
 - 启动顺序：Redis → MySQL（admin_system 库 + schema.sql）→ Nacos（可选）→ RocketMQ（可选）→ 后端 → 前端
+- 本地并行启动第二个实例时，Nacos 客户端会共用 `C:\Users\zhang\logs\nacos` 日志文件并冲突；验证实例建议追加：`--spring.config.import=optional:file:./target/noop.yml --spring.cloud.nacos.discovery.enabled=false --spring.cloud.nacos.config.enabled=false`
 
 ## 编译自检记录
 
@@ -77,3 +92,5 @@
 | 2026-10-24 | v1 P1-5 后端 compile + 前端 build | 0 / 0 | 菜单接口 + 前端动态菜单通过 |
 | 2026-10-24 | v1 P1-4 TraceId compile | 0 | 零错误零警告 |
 | 2026-10-25 | 主线0 `mvn clean package -DskipTests` | 0 | JDK 21；本阶段仅 SQL/文档变更，无 Java 变更 |
+| 2026-10-25 | 主线1 `mvn -q -Dtest=ScheduleManagerTest,ScheduleTxServiceImplTest,PluginRegistryTest test` | 0 | 14/14 通过 |
+| 2026-10-25 | 主线1 `mvn -q package -DskipTests` | 0 | 8081 启动验证通过 |

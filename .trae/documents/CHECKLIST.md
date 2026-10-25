@@ -44,7 +44,7 @@
 
 ### 3 步内核冒烟（按依赖阶段生效）
 - [x] 内核表数据与老表一致：2026-10-25 实测 `schedule_booking=8` = `meeting_booking=8`，`schedule_booking_item=8`（主线2 切换后需再校验一次）
-- [ ] 日志无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`（插件注册正常，主线1 完成即校验）
+- [x] 日志无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`（2026-10-25 8081 启动日志 `PluginRegistry count=0`，无 Bean 装配异常）
 - [ ] 幂等拦截覆盖新接口：`POST /api/schedule/book` 带相同 X-Request-Id 第二次 400（依赖主线4 新增接口）
 
 ---
@@ -84,15 +84,25 @@
 
 ## 三、主线1｜插件接口 + ScheduleManager 验收清单
 
-- [ ] 新增包 `com.example.adminsystem.plugin`：`ScheduleRulePlugin` / `ScheduleContext` / `PluginRegistry` / `ScheduleManager`
-- [ ] `ScheduleRulePlugin` 方法完整：`pluginCode()` / `supports(typeCode)` / `buildLockKey(ctx)` / `validate(ctx)` / `onBooked(ctx)` / `onCancelled(ctx)`
-- [ ] `PluginRegistry` 自动收集所有插件实现（Spring List 注入 → Map<pluginCode, plugin>）
-- [ ] `ScheduleManager.book/approve/cancel` 编排：解析插件 → tryLock（Controller 层）→ 独立 Bean `ScheduleTxService`（@Transactional）→ finally unlock
-- [ ] 锁包事务骨架未颠倒（红线4：锁在外、事务在内）
-- [ ] 未找到插件时抛 `BusinessException(400, "不支持的资源类型")`（不是 500）
-- [ ] 老接口 / 老 Service 零改动，v1 业务行为不变
-- [ ] `mvn -q compile` exit 0
-- [ ] 全量 20 步冒烟通过
+- [x] 新增包 `com.example.adminsystem.plugin`：`ScheduleRulePlugin` / `ScheduleContext` / `PluginRegistry` / `ScheduleManager`
+- [x] `ScheduleRulePlugin` 方法完整：`pluginCode()` / `supports(typeCode)` / `buildLockKey(ctx)` / `validate(ctx)` / `onBooked(ctx)` / `onCancelled(ctx)`
+- [x] `PluginRegistry` 自动收集所有插件实现（Spring `ObjectProvider` 注入 → `Map<pluginCode, plugin>`；零实现可启动）
+- [x] `ScheduleManager.book/approve/cancel` 编排：解析插件 → tryLock → 独立 Bean `ScheduleTxService`（@Transactional）→ finally unlock；锁在 Manager 内、事务在独立 Bean
+- [x] 锁包事务骨架未颠倒（红线4：锁在外、事务在内；Manager 无 `@Transactional`）
+- [x] 未找到插件时抛 `BusinessException(400, "不支持的资源类型")`（不是 500；`PluginRegistryTest` 覆盖）
+- [x] 插件编码重复启动失败（`IllegalStateException`；`PluginRegistryTest` 覆盖）
+- [x] 老接口 / 老 Service 零改动，v1 业务行为不变
+- [x] `mvn -q package -DskipTests` exit 0（含 compile）；单测 14/14 通过
+- [ ] 全量 20 步冒烟通过 —— 本阶段零改动老接口，执行只读子集 + 8081 启动/登录/列表；#7-#20 写路径沿用 v1 2026-10-24 全绿记录
+
+### 实施记录（2026-10-25 已完成）
+- [x] 新增 6 个主文件：`ScheduleRulePlugin` / `ScheduleContext` / `PluginRegistry` / `ScheduleManager` / `ScheduleTxService` / `ScheduleTxServiceImpl`
+- [x] 新增 3 个测试类共 14 项：`ScheduleManagerTest` 5、`ScheduleTxServiceImplTest` 5、`PluginRegistryTest` 4
+- [x] 8081 实例启动成功：`PluginRegistry count=0`、`Started AdminSystemBackendApplication`；登录 200、会议室列表 200；验证后关闭
+- [x] 红线文件与老 Controller/Service 零改动
+
+### 验收标记
+- [x] 状态更新为【已完成】，ROADMAP/STATE/CHECKLIST 三份文档同步
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **改造目标**：会议室预约单体系统 → 轻量可扩展资源调度内核（插件化架构）
 > **当前基线**：v1 会议室预约系统已交付（P0-1~P2-1 共 10 阶段全部完成），12 张表、6 个 Controller、Redisson/RocketMQ/Outbox/RBAC/TraceId 全套基础设施就绪
-> **文档版本**：v2 路线图（2026-10-25 主线 0 已完成，主线 1 待确认）
+> **文档版本**：v2 路线图（2026-10-25 主线 0/1 已完成，主线 2 待启动）
 
 ---
 
@@ -68,18 +68,26 @@
   - 编译自检：`mvn clean package -DskipTests` exit 0
   - 冒烟：登录、会议室列表、管理员/用户分页、未登录 401、越权 403 均符合预期；写路径沿用 v1 2026-10-24 全绿记录
 
-### 主线1｜内核抽象层：ScheduleRulePlugin 插件接口 + ScheduleManager 调度管理器 ｜【待确认】
+### 主线1｜内核抽象层：ScheduleRulePlugin 插件接口 + ScheduleManager 调度管理器 ｜【已完成】
 
 - **目标范围**：只建抽象骨架 + 空实现接线，不迁移任何业务逻辑（业务仍在老 Service）
 - **接口设计**
   - `ScheduleRulePlugin`：`pluginCode()` / `supports(typeCode)` / `buildLockKey(ctx)` / `validate(ctx)`（冲突或配额校验）/ `onBooked(ctx)`（写 outbox、扣减等）/ `onCancelled(ctx)`（归还等）
   - `ScheduleContext`：resourceType、resourceInstance、userId、startTime、endTime、quantity、bookingId、adminId、extParams
   - `PluginRegistry`：`Map<pluginCode, ScheduleRulePlugin>`，Spring 自动注入所有实现
-  - `ScheduleManager`：`book(ctx)` / `approve(ctx)` / `cancel(ctx)`；职责 = 解析插件 → Controller 层锁（tryLock）→ 调用独立 Bean `ScheduleTxService`（@Transactional）→ finally unlock（锁包事务骨架不变）
+  - `ScheduleManager`：`book(ctx)` / `approve(ctx)` / `cancel(ctx)`；职责 = 解析插件 → tryLock → 调用独立 Bean `ScheduleTxService`（@Transactional）→ finally unlock；Manager 自身无 `@Transactional`，保证锁在事务外
 - **变更文件清单（新增）**：`plugin/ScheduleRulePlugin.java`、`plugin/ScheduleContext.java`、`plugin/PluginRegistry.java`、`plugin/ScheduleManager.java`、`service/ScheduleTxService.java`（+Impl）
 - **风险**：① 抽象过度导致后续插件放不下 → 上下文用 extParams/extJson 兜底扩展；② 自调用 AOP 失效 → 事务放独立 Bean；③ 不影响老接口
 - **回滚**：新增文件全部为独立包，删除即回滚
 - **依赖**：主线 0
+- **实施记录（2026-10-25 已完成）**：
+  - 新增 `plugin` 包 4 个文件 + `ScheduleTxService` 接口/实现；未改任何现有 Java 文件
+  - `PluginRegistry` 使用 `ObjectProvider` 注入，零插件实现时应用可正常启动
+  - `ScheduleManager` 负责锁编排，`ScheduleTxServiceImpl` 负责事务与插件钩子；锁在事务外
+  - 单测 14/14：`ScheduleManagerTest` 5 项、`ScheduleTxServiceImplTest` 5 项、`PluginRegistryTest` 4 项
+  - `mvn -q package -DskipTests` exit 0；8081 启动日志 `PluginRegistry count=0`、`Started AdminSystemBackendApplication`，无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`
+  - 8081 实例登录 200、会议室列表 200；验证后已关闭
+  - 老接口零改动；20 步写路径沿用 v1 2026-10-24 全绿记录
 
 ### 主线2｜TimeExclusivePlugin：迁移时间冲突校验 + 分布式锁 + 过期释放 ｜【待开始】
 
@@ -163,7 +171,7 @@
 | 编号 | 任务 | 类型 | 优先级 | 状态 |
 |---|---|---|---|---|
 | 主线0 | 基线确认 + 数据模型 + 迁移脚本 | 主线 | P0 | 【已完成】 |
-| 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【待确认】 |
+| 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【已完成】 |
 | 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【待开始】 |
 | 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【待开始】 |
 | 主线4 | 工位扩展验证 | 主线 | P0 | 【待开始】 |
