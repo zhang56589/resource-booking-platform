@@ -1,4 +1,4 @@
-# 会议室预约中台（Reservation Middle Platform）
+# 资源预约中台（Reservation Middle Platform）
 
 > 前后端分离的企业级资源预约系统 · 简历项目  
 > 前端工程：`meeting-vue`（下文称 frontend） · 后端工程：`admin_system_backend`（下文称 backend）
