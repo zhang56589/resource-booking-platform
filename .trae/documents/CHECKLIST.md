@@ -45,7 +45,7 @@
 ### 3 步内核冒烟（按依赖阶段生效）
 - [x] 内核表数据与老表一致：2026-10-25 实测 `schedule_booking=8` = `meeting_booking=8`，`schedule_booking_item=8`（主线2 已在临时库再次校验切换后读写均走新表）
 - [x] 日志无 `NoSuchBeanDefinition` / `UnsatisfiedDependency`（2026-10-25 8081 启动日志 `PluginRegistry count=0`，无 Bean 装配异常）
-- [ ] 幂等拦截覆盖新接口：`POST /api/schedule/book` 带相同 X-Request-Id 第二次 400（依赖主线4 新增接口）
+- [x] 幂等拦截覆盖新接口：`POST /api/schedule/book` 带相同 X-Request-Id 第二次 400（2026-10-25 主线4 实测通过）
 
 ---
 
@@ -170,16 +170,27 @@
 
 ## 六、主线4｜工位扩展验证 验收清单（零代码复用证明）
 
-- [ ] `resource_type` 新增 WORKSTATION（plugin_code=TIME_EXCLUSIVE），`resource_instance` 新增 2 个工位实例
-- [ ] 新增通用入口 `POST /api/schedule/book`（resourceTypeCode + instanceId + 时间 + 数量）可提交工位预约
-- [ ] 工位预约冲突校验生效（同工位同时段第二次 400），**TimeExclusivePlugin 零改动**
-- [ ] 工位预约审批 / 取消全流程通过（复用内核审批）
-- [ ] 会议室与工位预约数据同表隔离（schedule_booking 按 resource_type_id 区分，互不串扰）
-- [ ] WebConfig 幂等路径追加 `/api/schedule/book`，重复 Request-Id 第二次 400
-- [ ] 返回结构与 Result 一致，未登录 401
-- [ ] `mvn -q compile` exit 0
-- [ ] 全量 20 步 + 内核 3 步通过
-- [ ] **结论记录**：新增资源类型只需 INSERT 字典 + 实例，无 Java 改动 → 扩展性验证通过
+- [x] `resource_type` 新增 WORKSTATION（plugin_code=TIME_EXCLUSIVE），`resource_instance` 新增 2 个工位实例
+- [x] 新增通用入口 `POST /api/schedule/book`（resourceTypeCode + instanceId + 时间 + 数量）可提交工位预约
+- [x] 工位预约冲突校验生效（同工位同时段第二次 400），**TimeExclusivePlugin 零改动**
+- [x] 工位预约审批 / 取消全流程通过（复用内核审批）
+- [x] 会议室与工位预约数据同表隔离（schedule_booking 按 resource_type_id 区分，互不串扰）
+- [x] WebConfig 幂等路径追加 `/api/schedule/book`，重复 Request-Id 第二次 400
+- [x] 返回结构与 Result 一致，未登录 401
+- [x] `mvn -q compile` / `mvn test` exit 0（29/29）
+- [x] 全量 20 步 + 内核 3 步通过（临时库 m4 共 20 项冒烟，会议室只读子集回归）
+- [x] **结论记录**：新增资源类型只需 INSERT 字典 + 实例，无 Java 改动 → 扩展性验证通过
+
+### 实施记录（2026-10-25 已完成）
+- 新增 `controller/ScheduleController`、`dto/ScheduleBookDTO`、`service/GeneralScheduleService` + Impl、`docs/seed_v2.sql`
+- 修改 `plugin/PluginRegistry`（supports 未命中 → `resource_type.plugin_code` 二级路由）、`mapper/ResourceTypeMapper`（+2 查询）、`config/WebConfig`（幂等路径）、`PluginRegistryTest`（+2 用例）
+- 冒烟 20/20：工位提交、同工位冲突、双工位并行、会议室同时间段隔离、类型/实例错配、未登录 401、幂等二次 400、审批通过、重复审批、越权取消、本人取消、重复取消、管理员分页
+- DB 核对：工位预约 `resource_type_id=2` / `plugin_code=TIME_EXCLUSIVE` / 每单 1 条 SLOT 明细
+- 日志命中「插件二级路由 typeCode=WORKSTATION, pluginCode=TIME_EXCLUSIVE」
+- `git status` 证明 `TimeExclusivePlugin.java` 零改动；红线文件零改动
+
+### 验收标记
+- [x] 状态更新为【已完成】，三份文档同步；等待用户验收，主线0-4 全部完成
 
 ---
 

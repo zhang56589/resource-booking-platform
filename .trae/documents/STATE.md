@@ -9,7 +9,7 @@
 | 主线1 | 插件接口 + ScheduleManager 调度管理器 | 主线 | P0 | ✅ **已完成** | 代码/单测/启动验证均通过 | 2026-10-25 | 2026-10-25 |
 | 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | ✅ **已完成** | 代码/单测/临时库冒烟/索引均通过，等待用户验收 | 2026-10-25 | 2026-10-25 |
 | 主线3 | 审批/消息适配 + 会议室全量回归 | 主线 | P0 | ✅ **已完成** | 代码/单测/临时库冒烟/前端回归均通过，等待用户验收 | 2026-10-25 | 2026-10-25 |
-| 主线4 | 工位扩展验证 | 主线 | P0 | 🔵 **待确认** | 方案已输出，等待用户确认 | 2026-10-25 | — |
+| 主线4 | 工位扩展验证 | 主线 | P0 | ✅ **已完成** | 代码/单测/临时库 20 项冒烟均通过，等待用户验收 | 2026-10-25 | 2026-10-25 |
 | 加分A | 两级可配置审批模板 | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分A】 | — | — |
 | 加分B | QuotaSharePlugin（GPU 配额） | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分B】 | — | — |
 | 加分C | 部门月度配额台账 | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分C】 | — | — |
@@ -19,10 +19,10 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：主线4（工位扩展验证，零代码复用 TIME_EXCLUSIVE 插件）【待确认】
-- **执行状态**：🔵 待确认 —— 方案已输出，未写任何代码
-- **下一步**：等待用户确认（`同意方案，开始改代码`）
-- **主线串行约束**：主线0/1/2/3 已完成；主线4 未确认前禁止编码；主线未全部完成前，禁止启动任何加分分支
+- **当前阶段**：主线4（工位扩展验证，零代码复用 TIME_EXCLUSIVE 插件）【已完成】
+- **执行状态**：✅ 已完成 —— 代码、单测、临时库冒烟全部通过，等待用户验收
+- **下一步**：等待用户验收；主线0-4 已全部完成，加分 A/B/C/D 需用户手动输入 `开启加分X` 才启动
+- **主线串行约束**：主线0/1/2/3/4 已完成；加分分支未获指令前禁止启动
 
 ### 主线0 实施结果（2026-10-25 已完成）
 
@@ -107,6 +107,29 @@
 - 红线文件与对外 URL / DTO / VO 零改动
 - 遗留观察（不阻塞验收）：Broker 恢复需重启应用；`selectProcessing` 取全表 status=3 多实例可能重复发送
 
+### 主线4 实施结果（2026-10-25 已完成）
+
+新增文件：
+- `controller/ScheduleController.java`（`POST /api/schedule/book`、`DELETE /api/schedule/cancel/{id}`）
+- `dto/ScheduleBookDTO.java`
+- `service/GeneralScheduleService.java`、`service/impl/GeneralScheduleServiceImpl.java`
+- `docs/seed_v2.sql`（WORKSTATION + `WS_A_01` / `WS_A_02`，幂等）
+
+修改文件：
+- `plugin/PluginRegistry.java`（二级路由：supports 未命中 → `resource_type.plugin_code`）
+- `mapper/ResourceTypeMapper.java`（`selectPluginCodeByTypeCode` / `selectTypeCodeById`）
+- `config/WebConfig.java`（幂等路径追加 `/api/schedule/book`、`/api/schedule/cancel/**`）
+- `src/test/.../plugin/PluginRegistryTest.java`（+2 项路由用例）
+
+验证结果：
+- 单测 29/29 通过（PluginRegistryTest 6）
+- `mvn clean package -DskipTests` exit 0
+- 临时库 `admin_system_m4_test` + Redis DB2（8082 实例）20 项冒烟全绿：工位提交、同工位冲突、双工位并行、会议室同时间段隔离、类型/实例错配、未登录 401、幂等二次 400、审批通过、重复审批、越权取消、本人取消、重复取消、管理员分页
+- DB 核对：工位预约 `resource_type_id=2` / `plugin_code=TIME_EXCLUSIVE` / `source=API`，每单 1 条 SLOT 明细
+- 日志确认命中「插件二级路由 typeCode=WORKSTATION, pluginCode=TIME_EXCLUSIVE」
+- `git status` 确认 `TimeExclusivePlugin.java` 零改动；红线文件零改动；老接口 URL/DTO/VO 零改动
+- 验证后关闭 8082、销毁临时库
+
 ### 本次初始化完成事项（未改代码）
 
 1. 读取 README、后端包结构（annotation/aspect/config/controller/dto/entity/enums/interceptor/mapper/scheduler/service/util/vo，无 plugin 包）、前端 views 目录、docs/schema.sql（12 张表）、`MeetingBooking` 实体、`MeetingBookingController` 锁逻辑、`MeetingBookingServiceImpl` 冲突校验与 outbox 逻辑
@@ -150,3 +173,5 @@
 | 2026-10-25 | 主线2 `mvn clean package -DskipTests` | 0 | 临时库 36 项冒烟全绿，8081 实例已验证并关闭 |
 | 2026-10-25 | 主线3 `mvn test` | 0 | 27/27 通过（新增 OutboxSchedulerTest 3 项） |
 | 2026-10-25 | 主线3 `mvn clean package -DskipTests` | 0 | 临时库 m3 冒烟 + 前端 3 步回归通过，实例已关闭并销毁临时库 |
+| 2026-10-25 | 主线4 `mvn test` | 0 | 29/29 通过（PluginRegistryTest 新增 2 项二级路由） |
+| 2026-10-25 | 主线4 `mvn clean package -DskipTests` | 0 | 临时库 m4 共 20 项冒烟全绿；8082 实例已关闭、临时库已销毁 |

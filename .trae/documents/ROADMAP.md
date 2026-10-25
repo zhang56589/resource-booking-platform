@@ -148,7 +148,7 @@
   - 已知遗留（记录未改造）：Broker 恢复后需重启应用（`RocketMQTemplate` 启动期条件装配）；`selectProcessing` 取全表 status=3，多实例可能重复发送
 
 
-### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【待确认】
+### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【已完成】
 
 - **目标范围**：只做后端验证，不做前端页面
 - **验证内容**：插入 `resource_type(WORKSTATION, TIME_EXCLUSIVE)` + 2 个工位实例 → 通过内核统一接口（`POST /api/schedule/book`）完成提交/冲突/审批/取消全流程 → 证明零代码改动复用插件
@@ -164,6 +164,17 @@
   - `WebConfig` 幂等路径追加 `/api/schedule/book`、`/api/schedule/cancel/**`
   - `docs/seed_v2.sql` 幂等插入：`WORKSTATION`（plugin_code=TIME_EXCLUSIVE）+ 2 个工位实例（`WS_A_01` / `WS_A_02`）
   - 验证：工位同实例同时段第二次 400；工位与会议室同时间段互不干扰；审批/取消全流程；幂等；20 步会议室冒烟 + 前端 3 步回归；`git diff` 证明 `TimeExclusivePlugin.java` 零改动
+- **实施记录（2026-10-25 已完成）**：
+  - 新增 `controller/ScheduleController`（`POST /api/schedule/book`、`DELETE /api/schedule/cancel/{id}`）、`dto/ScheduleBookDTO`、`service/GeneralScheduleService` + `impl/GeneralScheduleServiceImpl`
+  - `PluginRegistry` 增补二级路由：`supports` 未命中时按 `resource_type.plugin_code` 解析；`ResourceTypeMapper` 新增 `selectPluginCodeByTypeCode` / `selectTypeCodeById`
+  - `WebConfig` 幂等路径追加 `/api/schedule/book`、`/api/schedule/cancel/**`
+  - `docs/seed_v2.sql` 幂等插入 WORKSTATION + `WS_A_01` / `WS_A_02`，已在临时库执行
+  - 工位提交/冲突/跨类型隔离/类型实例错配/未登录/幂等/审批/重复审批/越权取消/本人取消/重复取消 共 20 项冒烟全通过
+  - DB 核对：工位预约 `resource_type_id=2`、`plugin_code=TIME_EXCLUSIVE`、`source=API`，每单 1 条 SLOT 明细；会议室同时间段独立写入互不影响
+  - 日志确认每次工位请求均命中「插件二级路由 typeCode=WORKSTATION, pluginCode=TIME_EXCLUSIVE」
+  - `git status` 确认 `TimeExclusivePlugin.java` 零改动；单测 29/29 通过，`mvn clean package -DskipTests` exit 0
+  - 临时库 `admin_system_m4_test` + Redis DB2 验证后销毁；8082 实例已关闭
+  - 遗留：审批复用 `/api/booking/approve`（同插件等价），未来接入不同插件需通用审批入口；插件提示文案仍为「会议室」措辞
 
 ---
 
@@ -218,7 +229,7 @@
 | 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【已完成】 |
 | 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【已完成】 |
 | 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【已完成】 |
-| 主线4 | 工位扩展验证 | 主线 | P0 | 【待确认】 |
+| 主线4 | 工位扩展验证 | 主线 | P0 | 【已完成】 |
 | 加分A | 两级审批模板 | 可选加分 | P1 | 【可选加分｜未开启】 |
 | 加分B | QuotaSharePlugin | 可选加分 | P1 | 【可选加分｜未开启】 |
 | 加分C | 部门月度配额台账 | 可选加分 | P1 | 【可选加分｜未开启】 |

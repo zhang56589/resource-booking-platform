@@ -45,6 +45,8 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/booking/approve",
                         "/api/booking/batch-approve",
                         "/api/booking/cancel/**",
+                        "/api/schedule/book",
+                        "/api/schedule/cancel/**",
                         "/api/room/add",
                         "/api/room/update",
                         "/api/room/delete/**",

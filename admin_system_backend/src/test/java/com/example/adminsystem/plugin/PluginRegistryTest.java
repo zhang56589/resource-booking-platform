@@ -1,5 +1,6 @@
 package com.example.adminsystem.plugin;
 
+import com.example.adminsystem.mapper.ResourceTypeMapper;
 import com.example.adminsystem.util.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,9 +25,12 @@ class PluginRegistryTest {
     @Mock
     private ScheduleRulePlugin plugin;
 
+    @Mock
+    private ResourceTypeMapper resourceTypeMapper;
+
     private PluginRegistry registry(ScheduleRulePlugin... plugins) {
         when(provider.orderedStream()).thenReturn(Arrays.stream(plugins));
-        return new PluginRegistry(provider);
+        return new PluginRegistry(provider, resourceTypeMapper);
     }
 
     @Test
@@ -41,6 +45,27 @@ class PluginRegistryTest {
     void resolve_unknownType_throws400() {
         when(plugin.pluginCode()).thenReturn("TIME_EXCLUSIVE");
         when(plugin.supports("WORKSTATION")).thenReturn(false);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> registry(plugin).resolveByTypeCode("WORKSTATION"));
+
+        assertEquals(400, ex.getCode().intValue());
+    }
+
+    @Test
+    void resolve_pluginCodeFallback_returnsPlugin() {
+        when(plugin.pluginCode()).thenReturn("TIME_EXCLUSIVE");
+        when(plugin.supports("WORKSTATION")).thenReturn(false);
+        when(resourceTypeMapper.selectPluginCodeByTypeCode("WORKSTATION")).thenReturn("TIME_EXCLUSIVE");
+
+        assertSame(plugin, registry(plugin).resolveByTypeCode("WORKSTATION"));
+    }
+
+    @Test
+    void resolve_pluginCodeFallbackMiss_throws400() {
+        when(plugin.pluginCode()).thenReturn("TIME_EXCLUSIVE");
+        when(plugin.supports("WORKSTATION")).thenReturn(false);
+        when(resourceTypeMapper.selectPluginCodeByTypeCode("WORKSTATION")).thenReturn("QUOTA_SHARE");
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> registry(plugin).resolveByTypeCode("WORKSTATION"));
