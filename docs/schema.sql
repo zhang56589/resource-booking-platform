@@ -261,3 +261,90 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 7), (1, 8), (1, 1)
 -- ALTER TABLE `operation_log`   DROP INDEX `idx_oplog_create_time`;
 -- ALTER TABLE `meeting_room`    DROP COLUMN `deleted`;
 -- ALTER TABLE `meeting_booking` DROP COLUMN `deleted`;
+
+-- ========================================================================
+-- v2 内核表（主线0）
+--   资源类型 / 资源实例 / 统一预约主表 / 预约明细表
+--   老表 meeting_room / meeting_booking 保留不动，数据迁移见 docs/migrate_v2.sql
+-- ========================================================================
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `schedule_booking_item`;
+DROP TABLE IF EXISTS `schedule_booking`;
+DROP TABLE IF EXISTS `resource_instance`;
+DROP TABLE IF EXISTS `resource_type`;
+
+CREATE TABLE `resource_type` (
+    `id`                      BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `type_code`               VARCHAR(50)  NOT NULL COMMENT '资源类型编码：MEETING_ROOM/WORKSTATION/GPU_POOL',
+    `type_name`               VARCHAR(100) NOT NULL COMMENT '资源类型名称',
+    `plugin_code`             VARCHAR(50)  NOT NULL COMMENT '调度插件编码：TIME_EXCLUSIVE/QUOTA_SHARE',
+    `approval_template_code`  VARCHAR(50)  DEFAULT NULL COMMENT '审批模板编码（加分A 预留）',
+    `enabled`                 TINYINT      NOT NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+    `deleted`                 TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
+    `create_time`             DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `update_time`             DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_resource_type_code` (`type_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资源类型字典';
+
+CREATE TABLE `resource_instance` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `type_id`          BIGINT       NOT NULL COMMENT '资源类型ID',
+    `instance_code`    VARCHAR(64)  NOT NULL COMMENT '实例编码（类型内唯一）',
+    `instance_name`    VARCHAR(100) NOT NULL COMMENT '实例名称',
+    `capacity`         INT          DEFAULT NULL COMMENT '容量（会议室人数/工位数等）',
+    `location`         VARCHAR(100) DEFAULT NULL COMMENT '位置',
+    `attributes_json`  JSON         DEFAULT NULL COMMENT '差异化属性 JSON（设备/楼层/GPU型号等）',
+    `status`           TINYINT      NOT NULL DEFAULT 1 COMMENT '0=禁用 1=启用',
+    `deleted`          TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
+    `create_time`      DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `update_time`      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_resource_instance_code` (`type_id`, `instance_code`),
+    INDEX `idx_resource_instance_type_status` (`type_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资源实例';
+
+CREATE TABLE `schedule_booking` (
+    `id`                    BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `booking_no`            VARCHAR(64)  NOT NULL COMMENT '预约单号（唯一）',
+    `resource_type_id`      BIGINT       NOT NULL COMMENT '资源类型ID',
+    `resource_instance_id`  BIGINT       NOT NULL COMMENT '资源实例ID',
+    `user_id`               BIGINT       NOT NULL COMMENT '预约人ID',
+    `start_time`            DATETIME     NOT NULL COMMENT '开始时间',
+    `end_time`              DATETIME     NOT NULL COMMENT '结束时间',
+    `quantity`              INT          NOT NULL DEFAULT 1 COMMENT '数量（时段类固定1，配额类为申请量）',
+    `status`                TINYINT      NOT NULL COMMENT '0=待审批 1=已通过 2=已驳回 3=已取消',
+    `plugin_code`           VARCHAR(50)  NOT NULL COMMENT '调度插件编码',
+    `source`                VARCHAR(20)  NOT NULL DEFAULT 'API' COMMENT '来源：LEGACY/API',
+    `ext_json`              JSON         DEFAULT NULL COMMENT '插件扩展字段（主题/理由/驳回原因等）',
+    `deleted`               TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
+    `create_time`           DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `update_time`           DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_schedule_booking_no` (`booking_no`),
+    INDEX `idx_schedule_instance_time` (`resource_instance_id`, `start_time`, `end_time`),
+    INDEX `idx_schedule_user_status` (`user_id`, `status`),
+    INDEX `idx_schedule_type_time` (`resource_type_id`, `start_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一预约主表';
+
+CREATE TABLE `schedule_booking_item` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `booking_id`  BIGINT       NOT NULL COMMENT '预约主表ID',
+    `item_type`   VARCHAR(20)  NOT NULL COMMENT '明细类型：SLOT/SEAT/QUOTA',
+    `item_key`    VARCHAR(100) NOT NULL COMMENT '明细键（实例编码/时间段/配额维度）',
+    `quantity`    INT          NOT NULL DEFAULT 1 COMMENT '数量',
+    `unit`        VARCHAR(20)  DEFAULT NULL COMMENT '单位',
+    `ext_json`    JSON         DEFAULT NULL COMMENT '扩展字段',
+    `deleted`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除 0=正常 1=已删',
+    `create_time` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_booking_item_booking` (`booking_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='预约明细表';
+
+-- 预置资源类型：会议室（迁移脚本可重复补种，保持幂等）
+INSERT INTO `resource_type` (`type_code`, `type_name`, `plugin_code`, `approval_template_code`, `enabled`, `deleted`)
+VALUES ('MEETING_ROOM', '会议室', 'TIME_EXCLUSIVE', NULL, 1, 0);
+
+SET FOREIGN_KEY_CHECKS = 1;

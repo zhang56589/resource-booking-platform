@@ -1,126 +1,173 @@
-# 会议室预约系统｜Builder 主控路线图
+# 资源调度内核重构｜Builder 主控路线图
 
-## 基线（阶段0 已完成）
-
-| 项 | 状态 |
-|---|---|
-| 编译自检（mvn clean compile） | ✅ 零错误零警告 |
-| Maven package -DskipTests | ✅ jar 生成 |
-| Spring 容器启动 | 🔴 被 Redisson eager 初始化阻断（Redis 未启动）—— 非代码问题 |
-| Bean 装配静态审计 | ✅ 30 项通过（见 STATE.md） |
-| Controller 返回统一 | ✅ 21 个接口 34 个出口 100% Result 包裹 |
-| 分布式锁 | ✅ Controller 层锁包事务，finally + isHeldByCurrentThread 保护 |
-| DB FOR UPDATE | ✅ 时间重叠 hasTimeConflict(lt/gt) 双重校验 |
-| MQ | ✅ afterCommit 事务后发送 + @ConditionalOnProperty 可选加载 |
-| 全局异常 | ✅ BusinessException 最前置 + TransactionSystemException 锁超时业务化 |
-| 枚举 | ✅ BookingStatusEnum 0/1/2/3 / RoomStatusEnum / UserRoleEnum |
-| TokenInterceptor | ✅ 白名单 + 角色校验 + username 写入 request（**红线：禁止修改**） |
-| Redis eager 初始化 | 🟡 维持现状（先起 Redis 再启后端） |
-
-## 绝对禁止修改清单（红线）
-
-1. `TokenInterceptor.java` —— 稳定模块，禁止擅自修改
-2. `Result.java` 统一返回体 / `BusinessException` —— 禁止修改
-3. `GlobalExceptionHandler.java` 已有的锁超时、业务异常分支 —— 禁止覆盖，新增只能追加
-4. `MeetingBookingController.submit` / `approve` **锁在外、事务在内**的基础骨架 —— 仅允许调整锁 key、锁策略，禁止颠倒顺序
-5. 不新增业务逻辑、不引入重型中间件（分布式限流、延迟队列、分库分表等）
+> **改造目标**：会议室预约单体系统 → 轻量可扩展资源调度内核（插件化架构）
+> **当前基线**：v1 会议室预约系统已交付（P0-1~P2-1 共 10 阶段全部完成），12 张表、6 个 Controller、Redisson/RocketMQ/Outbox/RBAC/TraceId 全套基础设施就绪
+> **文档版本**：v2 路线图（2026-10-25 主线 0 已完成，主线 1 待确认）
 
 ---
 
-## 阶段序列（依赖顺序：P0 → P1 → P2，强依赖阶段必须按序执行）
+## 一、基线快照（只读复用，不重构）
 
-### P0-1｜锁粒度拆分优化（高优）✅ **已完成 2026-10-24**
-- **目标**：approve 改为预约单粒度锁（booking:id:{bookingId}），submit 保持会议室粒度（booking:room:{roomId}）。理由：approve 是对已存在 booking 单的状态变更，只需要串行化**同一个 bookingId** 的并发审批请求，不需要把整个会议室锁死；submit 仍然需要会议室粒度锁防止同时段冲突
-- **影响文件**：`MeetingBookingController.java`（approve 方法锁 key 改 bookingId）、`MeetingBookingServiceImpl.java`（新增注释说明两种锁粒度）
-- **依赖**：无
-
-### P0-2｜本地消息表 RocketMQ 可靠消息最终一致性（高优）✅ **已完成 2026-10-24**
-- **目标**：新增 `sys_outbox` 表 + 定时任务轮询 outbox 表 → 发 MQ。解决当前 MQ 发送在 afterCommit 回调里但 Producer 异常吞掉导致"预约成功但通知永远没发"的隐患（DB 提交成功但 MQ 发送失败会静默跳过）
-- **影响文件**：`docs/schema.sql`（sys_outbox CREATE TABLE）、新增 `SysOutbox` 实体 + Mapper + XML + Service + Impl、新增 `OutboxScheduler` 定时任务（`@Scheduled(cron="0/5 * * * * ?")`）、`MeetingBookingServiceImpl`（submitBooking + approve 事务内 outbox save 替代 afterCommit Producer，删除 runAfterCommit + bookingNotificationProducer）、`AdminSystemBackendApplication`（加 `@EnableScheduling`）
-- **依赖**：P0-1（锁粒度确认后再改 outbox，避免锁内 MQ 逻辑漂移）
-- **实现要点**：MySQL 5.7 无 FOR UPDATE SKIP LOCKED → markProcessing 用 UPDATE status=3 + LIMIT 抢占 → 再 SELECT WHERE status=3；SendCallback 为抽象类 → 用匿名类而非 lambda；RocketMQTemplate @Autowired(required=false) 优雅降级
-- **隐患消除**：B-2 ✅ 已修复 —— outbox save 失败抛 BusinessException 触发事务回滚，保证"预约成功但通知永远没发"不再发生
-
-### P0-3｜RBAC 细粒度权限改造（高优）✅ **已完成 2026-10-24**
-- **目标**：新增 `@RequiresPermission("模块:动作")` 细粒度权限注解 + `PermissionAspect` AOP 切面（查 sys_role_permission 映射），与现有 `@RequireAdmin` + TokenInterceptor 拦截两层并行兼容
-- **影响文件**：`docs/schema.sql`（追加 3 张表 + 预置数据）、新增 `SysRole` / `SysPermission` / `SysRolePermission` 3 个实体、3 个 Mapper + `SysRolePermissionMapper.xml`、新增 `@RequiresPermission` 注解、新增 `PermissionAspect` 切面、`MeetingBookingController`（移除 `requireAdminId` inline 双重检查）、`pom.xml`（追加 `spring-boot-starter-aop`）
-- **依赖**：无
-- **方案修正（与原 ROADMAP 差异）**：不修改 TokenInterceptor（红线），不改 SysUser.role 字段类型（保持 Integer），AOP 层直接读 request.getAttribute("role") 的 Integer 值查映射表；TokenInterceptor 对 @RequireAdmin 的校验保持不动，两层独立并行
-- **实现要点**：PermissionAspect 在 TokenInterceptor preHandle 之后执行 → roleId 已写入 request → 查 sys_role_permission JOIN sys_permission → 匹配权限码；SysRole.id 与 SysUser.role 对齐（0=employee, 1=admin），后续扩展 auditor(2) 只需 INSERT 新角色 + 映射
-- **Mapper XML**：SysRolePermissionMapper 自定义 `selectPermissionCodesByRoleId`（INNER JOIN sys_permission）
-
-### P0-4｜幂等拦截器 RequestId 防重复提交（高优）✅ **已完成 2026-10-24**
-- **目标**：新增 `IdempotentInterceptor` + Redisson SETNX（key=`idempotent:{userId}:{requestId}`, TTL=60s）。`X-Request-Id` Header **可选**，存在则校验，不存在则跳过（降级模式）；Redis 不可达 → warn + 放行
-- **影响文件**：新增 `IdempotentInterceptor`（Redisson RBucket.trySet 实现 SETNX）、`WebConfig`（在 TokenInterceptor 之后注册，只匹配 11 条写操作路径）
-- **依赖**：无（Redisson starter 已在）
-- **实现要点**：拦截器注册顺序 = TokenInterceptor 先 → IdempotentInterceptor 后（前者写 userId 到 request，后者读取）；匹配列表只覆盖 POST/PUT/DELETE 写操作，GET 只读接口不受影响；Redis 异常降级放行（幂等是增强不是安全屏障）
-- **方案修正**：原 ROADMAP 写"前端必须带 X-Request-Id"→ 修正为可选 Header；原计划 StringRedisTemplate → 实际用 Redisson RBucket（保持与项目现有分布式锁技术栈一致）
-
-### P1-1｜数据库索引优化 + 软删除改造（中优）✅ **已完成 2026-10-24**
-- **目标**：① meeting_booking 表加复合索引 (room_id, start_time, end_time) + (user_id, res_status)；② meeting_room / meeting_booking 加 deleted tinyint(1) DEFAULT 0 软删除 + MyBatis-Plus `@TableLogic`；③ operation_log 加索引 (create_time)
-- **影响文件**：DDL ALTER TABLE、Entity 加 deleted 字段 + `@TableLogic`、MyBatis XML（如存在手写 join 需加 deleted=0 条件）
-- **依赖**：无
-- **实施摘要**：索引（idx_booking_room_time / idx_booking_user_status / idx_oplog_create_time）基线 schema.sql 已存在，无需新增；本阶段只补 `meeting_room.deleted` + `meeting_booking.deleted` 两列 + `@TableLogic`；手写 SQL 共 6 处追加 `deleted=0`（2 处 selectByIdForUpdate + 4 处 XML JOIN）；B-6 已修复
-- **环境注意**：本机 Maven 默认 JDK 1.8 不支持 pattern matching，须先 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21.0.10'`
-
-### P1-2｜批量审批、会议室批量启停接口（中优）✅ **已完成 2026-10-24**
-- **目标**：新增 `POST /api/booking/batch-approve`（入参 bookingIds: List<Long>, status, rejectReason）、`PUT /api/room/batch-enable` + `PUT /api/room/batch-disable`（入参 ids: List<Long>）。批量操作在一个事务里，每个元素复用单次的业务校验逻辑（通过 Service 循环调用，不直接 foreach updateById 跳过校验）
-- **影响文件**：Controller 新增方法 + DTO + Service 新增批量方法（复用单次校验）
-- **依赖**：无
-- **实施摘要**：新增 `BookingBatchApproveDTO` / `RoomBatchDTO`；批量审批锁粒度与单次 approve 一致（`booking:approve:{bookingId}`），Service 循环内逐元素 tryLock/unlock（不同时持多锁，无死锁）；会议室批量操作复用单次 enable/disable/delete 全部校验（含未完结预约拦截）；Controller 加 `@RequireAdmin` + `@RequiresPermission` 双层校验；幂等拦截器追加 4 条批量路径
-
-### P1-3｜Nacos @RefreshScope 动态配置抽离（中优）✅ **已完成 2026-10-24**
-- **目标**：把 application.yml 里的 `jwt.secretKey` / `jwt.expireMinutes` / `redisson.*` / `rocketmq.*` 抽到 Nacos 配置中心（dataId=admin-system-backend.yaml, group=DEFAULT_GROUP）。配置类加 `@RefreshScope` 热刷新
-- **影响文件**：`JwtProperties` 加 `@RefreshScope`、application.yml 改为 bootstrap.yml + 移除对应 key、Nacos 配置初始化脚本
-- **依赖**：无（但需要 Nacos 启动）
-- **实施摘要**：pom.xml 加 `spring-cloud-starter-alibaba-nacos-config`；application.yml 用 `spring.config.import: optional:nacos:admin-system-backend.yaml?group=DEFAULT_GROUP`（非 bootstrap.yml 方式，省一个 starter 依赖）；jwt / rocketmq 本地默认值保留作 Nacos 宕机兜底；`JwtProperties` 加 `@RefreshScope`
-- **方案修正**：bootstrap.yml → spring.config.import；移除本地 key → 保留本地默认值
-
-### P1-4｜MDC 全链路 TraceId 埋点（中优）✅ **已完成 2026-10-24**
-- **目标**：新增 `TraceIdInterceptor`（Servlet 层，优先级高于 TokenInterceptor）+ `MDCUtil`。入站请求生成 TraceId（UUID）写入 MDC + response Header `X-Trace-Id`；出站 Redis / DB / MQ 调用自动带 TraceId。logback-spring.xml 配置 pattern 含 `%X{traceId}`
-- **影响文件**：新增 `TraceIdInterceptor`、`WebConfig` 注册、新增 `logback-spring.xml`（如存在则追加 pattern）
-- **依赖**：无
-- **实施摘要**：新增 `TraceIdInterceptor`（入站继承或生成 X-Trace-Id → MDC + 响应头；afterCompletion 清 MDC 防线程池串号）；新增 `logback-spring.xml`（pattern `%d{...} [%X{traceId:-}] [%thread] %-5level %logger{36} - %msg%n`）；WebConfig order=-100 先于 TokenInterceptor；前端 request.js 带 X-Trace-Id 属 P1-5 顺带事项
-
-### P1-5｜前端独立阶段：动态菜单、按钮权限 v-permission（中优）✅ **已完成 2026-10-24**
-- **目标**：登录后调后端 `/api/user/menu` 返回菜单树（role 过滤）；Element Plus 侧边栏由菜单树动态渲染；自定义 `v-permission` 指令（如 `v-permission="'booking:approve'"`）控制按钮显隐；router/index.js 改为动态 addRoute
-- **影响文件**：前端 `router/index.js`、`api/auth.js`、新增 `permission.js` 指令、新增后端 `MenuController` + `SysMenu` 实体
-- **依赖**：P0-3（RBAC 先做好，动态菜单才有数据来源）
-- **实施摘要**：后端新增 sys_menu + sys_role_menu 两张表（DDL 入 schema.sql）+ MenuController `GET /api/user/menu` 返回 `{menus, permissions}`；前端 permission.js 指令 + Login 拉取存 localStorage + Home.vue 数据驱动侧边栏（兜底静态菜单）+ request.js X-Trace-Id；**方案修正**：保留静态路由表 + meta.role 守卫（不重写为 addRoute，降低风险），不引入 pinia（存 localStorage）
-
-### P2-1｜收尾：README / 接口文档 / SQL 脚本汇总（低优）✅ **已完成 2026-10-24**
-- **目标**：所有阶段完成后，README 最终对齐、OpenAPI 文档校验（Knife4j `/doc.html`）、6 张业务表 + 新增表的 CREATE TABLE SQL 统一输出到 `docs/schema.sql`
-- **影响文件**：`README.md`、新增 `docs/schema.sql`
-- **依赖**：所有 P0 / P1 阶段
-- **实施摘要**：README 对齐 16 项核心能力 + 4 个批量接口 + /api/user/menu 接口清单 + 亮点一（双粒度锁）/亮点三（Outbox）改写 + JDK 21 编译提示 + 12 张表部署说明；新增 `docs/seed.sql`（sys_user 3 账号 BCrypt 真实 hash + RBAC + 菜单 + 演示会议室）；修复 schema.sql sys_user 列名 `nickname`→`real_name`（实体映射不一致 bug）；schema.sql 补 sys_user 预置账号；核对 12 张表 CREATE 齐全
-
----
-
-## 阶段依赖图
-
-```
-P0-1 锁粒度  ──→  P0-2 本地消息表
-                 
-P0-3 RBAC  ──→  P1-5 前端动态菜单
-
-P0-4 幂等 （独立，不阻塞任何阶段）
-
-P1-1 索引软删 / P1-2 批量接口 / P1-3 Nacos / P1-4 TraceId （全独立）
-
-所有 P0 + P1 ──→  P2-1 收尾
-```
-
-## 预计影响文件统计
-
-| 阶段 | 新增文件 | 修改文件 |
+| 项 | 现状 | 复用方式 |
 |---|---|---|
-| P0-1 | 0 | 2 |
-| P0-2 | 4 | 1 |
-| P0-3 | 5 | 2 + DDL |
-| P0-4 | 2 | 1 |
-| P1-1 | 0 | Entity XML + DDL |
-| P1-2 | 2 | 2 |
-| P1-3 | 1 | 3 |
-| P1-4 | 2 | 1 |
-| P1-5 | 前端 5 + 后端 2 | 前端 3 |
-| P2-1 | 1 docs/schema.sql | README.md |
+| 技术栈 | JDK 21 / Spring Boot 3.3.4 / MP 3.5.5 / Redisson 3.37.0 / MySQL 5.7+ | 原样复用 |
+| 现有表（12 张） | sys_user、meeting_room、meeting_booking、operation_log、sys_login_log、sys_operate_log、sys_outbox、sys_role、sys_permission、sys_role_permission、sys_menu、sys_role_menu | 老表保留，主线 0 新增 4 张内核表 |
+| 分布式锁 | Controller 层 tryLock → Service @Transactional → finally unlock；submit 锁 `booking:room:{roomId}`，approve 锁 `booking:approve:{bookingId}` | 迁移进插件（主线 2），锁包事务骨架不变 |
+| 冲突校验 | `MeetingBookingServiceImpl.hasTimeConflict()`（lt/gt 双重区间判断）+ `selectByIdForUpdate` FOR UPDATE | 迁移进 TimeExclusivePlugin（主线 2） |
+| 可靠消息 | `sys_outbox` + `OutboxScheduler`（5s 轮询、指数退避、死信） | 内核统一走 outbox（主线 3 适配） |
+| 权限 | TokenInterceptor（@RequireAdmin）+ PermissionAspect（@RequiresPermission）双轨 | 原样复用，内核接口沿用注解 |
+| 幂等 | IdempotentInterceptor（X-Request-Id + Redisson SETNX） | WebConfig 路径追加内核新接口 |
+| 配置/日志 | Nacos `spring.config.import` 热刷新 + MDC TraceId | 原样复用 |
+| 前端 | Vue3 + Element Plus，6 个业务页面 + 动态菜单 + v-permission | 主线阶段不改前端（加分 D 才动） |
+
+---
+
+## 二、绝对禁止修改清单（红线，全程自动拦截）
+
+1. `TokenInterceptor.java`
+2. `Result.java` / `BusinessException.java`
+3. `GlobalExceptionHandler.java` 已有的锁超时、业务异常分支（只能新增方法，不改已有逻辑）
+4. 现有对外接口签名：`/api/booking/*`、`/api/room/*`、`/api/user/*` 的 URL、入参 DTO、返回结构（主线 3 前必须保持兼容，允许 Controller 内部改为委托内核）
+5. 老表 `meeting_room` / `meeting_booking` 在主线 4 全量回归通过前，禁止 DROP、禁止改字段
+6. 不引入重型中间件（分库分表、分布式事务框架、流程引擎等）；加分 A 的审批模板用轻量配置表实现，不引入 Flowable/Activiti
+
+---
+
+## 三、主线任务（P0 必做，严格串行，不可打乱）
+
+### 主线0｜基线确认 + 内核数据模型设计 + 老数据迁移脚本 ｜【已完成】
+
+- **目标范围**：只做数据模型与迁移脚本，不写业务代码、不改现有 Service
+- **数据模型（新增 4 张表）**
+
+| 表 | 作用 | 关键字段 |
+|---|---|---|
+| `resource_type` | 资源类型字典（会议室 / 工位 / GPU 池） | `type_code`(MEETING_ROOM/WORKSTATION/GPU_POOL)、`type_name`、`plugin_code`(TIME_EXCLUSIVE/QUOTA_SHARE)、`approval_template_code`（加分A预留，先留空）、`enabled`、`deleted` |
+| `resource_instance` | 资源实例（具体会议室 / 具体工位） | `type_id`、`instance_code`、`instance_name`、`capacity`、`location`、`attributes_json`（JSON：设备/楼层/GPU型号等差异化属性）、`status`(0禁用/1启用)、`deleted` |
+| `schedule_booking` | 统一预约主表（替代 meeting_booking 的通用版） | `booking_no`、`resource_type_id`、`resource_instance_id`、`user_id`、`start_time`、`end_time`、`quantity`（配额类资源用，时段类固定 1）、`status`、`plugin_code`、`source`(LEGACY/API)、`ext_json`（插件扩展字段）、`deleted`、`create_time`、`update_time` |
+| `schedule_booking_item` | 预约明细表（一次预约的多个子项） | `booking_id`、`item_type`(SLOT/SEAT/QUOTA)、`item_key`（工位号/时间段/配额维度）、`quantity`、`unit`、`ext_json`、`deleted` |
+
+- **ER 关系**：`resource_type 1--N resource_instance`；`resource_instance 1--N schedule_booking`；`schedule_booking 1--N schedule_booking_item`；`sys_user 1--N schedule_booking`
+- **索引设计**：`schedule_booking(resource_instance_id, start_time, end_time)`、`schedule_booking(user_id, status)`、`schedule_booking(resource_type_id, start_time)`、`schedule_booking_item(booking_id)`
+- **老数据迁移脚本 `docs/migrate_v2.sql`**：
+  1. `meeting_room` → `resource_instance`（type_id 取 MEETING_ROOM；room_name→instance_name；capacity/location 直映；description 写入 attributes_json）
+  2. `meeting_booking` → `schedule_booking`（room_id→resource_instance_id；status 编码保持 0/1/2/3；plugin_code=TIME_EXCLUSIVE；source=LEGACY）
+  3. 每条预约生成 1 条 `schedule_booking_item`（item_type=SLOT，item_key=实例 code）
+  4. 校验段：迁移前后 count 比对、时间区间抽样比对
+  5. 幂等：脚本可重复执行（先 DELETE 迁移标记数据 / 或 INSERT IGNORE by booking_no）
+- **变更文件清单（本阶段）**：`docs/schema.sql`（追加 4 表 DDL，不删旧表）、新增 `docs/migrate_v2.sql`、`.trae/documents/` 三份文档
+- **风险**：① 迁移数据量小（演示系统），风险低；② 状态编码映射错误导致审批历史失真 → 脚本内建校验段；③ 新旧表并存期双写缺失 → 主线 0-2 采用"老流程写老表 + 新表只读迁移验证"，主线 3 统一切新表
+- **回滚**：`docs/migrate_v2.sql` 末尾提供 rollback 段（DROP 新 4 表），老表未动，业务零影响
+- **依赖**：无
+- **实施记录（2026-10-25 已完成）**：
+  - `docs/schema.sql` 已追加 4 张内核表，新库共 12 + 4 = 16 张表；`resource_type` 预置 1 条 MEETING_ROOM / TIME_EXCLUSIVE
+  - `docs/migrate_v2.sql` 已创建并执行：会议室→实例、预约→统一预约、每单 1 条 SLOT 明细；按业务唯一键判重，可重复执行
+  - 孤儿数据处理：老预约引用了已物理删除的会议室时，补建 `status=0 / deleted=1` 占位实例（`attributes_json.orphan=true`），避免历史预约丢失
+  - 实际库 `admin_system` 结果：`resource_type=1`、`resource_instance=7`（5 真实 + 2 孤儿）、`schedule_booking=8`、`schedule_booking_item=8`
+  - 老表未改动：`meeting_room=5`、`meeting_booking=8`；校验段全部 OK，重复执行两次 count 不变
+  - 编译自检：`mvn clean package -DskipTests` exit 0
+  - 冒烟：登录、会议室列表、管理员/用户分页、未登录 401、越权 403 均符合预期；写路径沿用 v1 2026-10-24 全绿记录
+
+### 主线1｜内核抽象层：ScheduleRulePlugin 插件接口 + ScheduleManager 调度管理器 ｜【待确认】
+
+- **目标范围**：只建抽象骨架 + 空实现接线，不迁移任何业务逻辑（业务仍在老 Service）
+- **接口设计**
+  - `ScheduleRulePlugin`：`pluginCode()` / `supports(typeCode)` / `buildLockKey(ctx)` / `validate(ctx)`（冲突或配额校验）/ `onBooked(ctx)`（写 outbox、扣减等）/ `onCancelled(ctx)`（归还等）
+  - `ScheduleContext`：resourceType、resourceInstance、userId、startTime、endTime、quantity、bookingId、adminId、extParams
+  - `PluginRegistry`：`Map<pluginCode, ScheduleRulePlugin>`，Spring 自动注入所有实现
+  - `ScheduleManager`：`book(ctx)` / `approve(ctx)` / `cancel(ctx)`；职责 = 解析插件 → Controller 层锁（tryLock）→ 调用独立 Bean `ScheduleTxService`（@Transactional）→ finally unlock（锁包事务骨架不变）
+- **变更文件清单（新增）**：`plugin/ScheduleRulePlugin.java`、`plugin/ScheduleContext.java`、`plugin/PluginRegistry.java`、`plugin/ScheduleManager.java`、`service/ScheduleTxService.java`（+Impl）
+- **风险**：① 抽象过度导致后续插件放不下 → 上下文用 extParams/extJson 兜底扩展；② 自调用 AOP 失效 → 事务放独立 Bean；③ 不影响老接口
+- **回滚**：新增文件全部为独立包，删除即回滚
+- **依赖**：主线 0
+
+### 主线2｜TimeExclusivePlugin：迁移时间冲突校验 + 分布式锁 + 过期释放 ｜【待开始】
+
+- **目标范围**：把老会议室逻辑完整搬进插件，老 Service 改为委托；对外接口不变
+- **迁移内容**
+  1. 锁粒度：submit `schedule:room:{instanceId}`、approve `schedule:approve:{bookingId}`（沿用 v1 双粒度结论）
+  2. 冲突校验：`hasTimeConflict` 逻辑迁入插件，SQL 查 `schedule_booking`（deleted=0 AND status IN (0,1) AND start_time < :end AND end_time > :start）
+  3. FOR UPDATE：审批/取消仍锁 resource_instance + booking 行
+  4. 过期释放：`start_time < now` 的未审批记录不参与冲突（懒失效）+ 定时任务将过期 PENDING 置为取消（可配置关闭）
+  5. 状态机：0待审批 / 1通过 / 2驳回 / 3取消（编码不变）
+- **变更文件清单（修改）**：`MeetingBookingServiceImpl`（改为委托 ScheduleManager，方法签名不变）、`MeetingBookingController`（锁 key 改由插件提供，锁包事务位置不变）、新增 `plugin/timeexclusive/TimeExclusivePlugin.java`、`resources/mapper/ScheduleBookingMapper.xml`
+- **风险**：① 双写期数据不一致 → 主线 2 起老表停写、新表统一切换，切换前跑迁移脚本；② 冲突 SQL 走错索引 → 强制命中 `(resource_instance_id, start_time, end_time)`；③ 锁 key 变化导致灰度期间互斥失效 → 单实例部署，无灰度
+- **回滚**：git 还原 Service/Controller，插件包删除，数据仍在老表（老表只读未删）
+- **依赖**：主线 1
+
+### 主线3｜审批 / 消息通知 / 可靠消息链路适配 + 会议室全业务回归 ｜【待开始】
+
+- **目标范围**：审批、outbox、MQ 通知全部走内核，v1 会议室 20 步冒烟 + 前端 3 步全绿
+- **适配内容**：approve/cancel/batch-approve 委托 ScheduleManager；outbox payload 保持 v1 结构（topic/tag 不变，bookingId→scheduleId）；`GET /api/booking/*` 查询接口改查 `schedule_booking`（VO 字段保持不变）
+- **变更文件清单**：`MeetingBookingController`、`MeetingBookingServiceImpl`、`MeetingBookingMapper.xml`、`SysOutbox` payload 构造
+- **风险**：① VO 字段变化破坏前端 → 查询 SQL 别名对齐原 VO；② 历史数据 status 语义差异 → 迁移脚本校验
+- **回滚**：还原 3 个文件 + 查询改回老表
+- **依赖**：主线 2
+
+### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【待开始】
+
+- **目标范围**：只做后端验证，不做前端页面
+- **验证内容**：插入 `resource_type(WORKSTATION, TIME_EXCLUSIVE)` + 2 个工位实例 → 通过内核统一接口（`POST /api/schedule/book`）完成提交/冲突/审批/取消全流程 → 证明零代码改动复用插件
+- **变更文件清单**：新增 `controller/ScheduleController.java`（通用预约入口：`POST /api/schedule/book`、`DELETE /api/schedule/cancel/{id}`）、`WebConfig` 幂等路径追加 1 条、`docs/seed_v2.sql`（工位演示数据）
+- **风险**：① 通用接口权限模型 → 沿用登录用户 + @RequiresPermission("booking:submit")；② 与老接口重复 → 老接口保留（旨在兼容），新接口独立路径
+- **回滚**：删除 ScheduleController + seed 数据
+- **依赖**：主线 3
+
+---
+
+## 四、加分分支（P1 可选，必须用户手动下达【开启加分A/B/C/D】才启动，不阻塞主线）
+
+### 加分A｜两级可配置审批模板，按资源类型绑定 ｜【可选加分｜未开启】
+- 表：`approval_template`（模板编码/名称/层级数）、`approval_template_node`（模板ID/层级/角色/审批条件）
+- 流程：提交 → 一级审批通过 → 二级审批通过 → 终态；`resource_type.approval_template_code` 绑定
+- 影响：审批模板服务 + ScheduleManager 审批节点分流 + 前端审批页多级展示
+
+### 加分B｜QuotaSharePlugin 配额共享插件（GPU 算力池） ｜【可选加分｜未开启】
+- 表：`quota_pool`（pool_code、total、used、version 乐观锁）、`quota_usage`（booking_id、pool_code、quantity、状态）
+- 逻辑：锁 `schedule:quota:{poolCode}` → 校验余量 → 扣减（version CAS）→ 取消归还 → outbox 通知
+- 影响：新增插件 + 资源类型 GPU_POOL + 配额台账事务
+
+### 加分C｜部门月度配额台账 ｜【可选加分｜未开启】
+- 表：`dept_quota_ledger`（dept_id、month、quota_limit、used、version）；月度重置定时任务
+- 影响：台账服务 + 每月 1 日 00:05 重置任务 + 超额拦截接入 QuotaSharePlugin
+
+### 加分D｜前端自适应视图：GPU 配额余量页 + 动态表单渲染 ｜【可选加分｜未开启】
+- 依据 `resource_instance.attributes_json` schema 渲染动态表单；新增配额余量卡片页
+- 影响：前端 views/resource/* 新页面 + 表单渲染组件；后端补 attributes schema 返回
+
+---
+
+## 五、阶段依赖图
+
+```
+主线0 数据模型+迁移
+   ↓
+主线1 内核抽象（接口+管理器）
+   ↓
+主线2 TimeExclusivePlugin（会议室逻辑迁移）
+   ↓
+主线3 审批/可靠消息适配 + 全量回归
+   ↓
+主线4 工位扩展验证（零代码复用证明）
+
+加分A ──┐
+加分B ──┼── 均依赖主线4（内核稳定后可选叠加，互不阻塞）
+加分C ──┤
+加分D ──┘
+```
+
+---
+
+## 六、进度总览
+
+| 编号 | 任务 | 类型 | 优先级 | 状态 |
+|---|---|---|---|---|
+| 主线0 | 基线确认 + 数据模型 + 迁移脚本 | 主线 | P0 | 【已完成】 |
+| 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【待确认】 |
+| 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【待开始】 |
+| 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【待开始】 |
+| 主线4 | 工位扩展验证 | 主线 | P0 | 【待开始】 |
+| 加分A | 两级审批模板 | 可选加分 | P1 | 【可选加分｜未开启】 |
+| 加分B | QuotaSharePlugin | 可选加分 | P1 | 【可选加分｜未开启】 |
+| 加分C | 部门月度配额台账 | 可选加分 | P1 | 【可选加分｜未开启】 |
+| 加分D | 前端自适应视图 | 可选加分 | P1 | 【可选加分｜未开启】 |
