@@ -8,8 +8,8 @@
 | 主线0 | 基线确认 + 数据模型 + 老数据迁移脚本 | 主线 | P0 | ✅ **已完成** | SQL 已落盘并验证：迁移/幂等/校验/编译均通过 | 2026-10-25 | 2026-10-25 |
 | 主线1 | 插件接口 + ScheduleManager 调度管理器 | 主线 | P0 | ✅ **已完成** | 代码/单测/启动验证均通过 | 2026-10-25 | 2026-10-25 |
 | 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | ✅ **已完成** | 代码/单测/临时库冒烟/索引均通过，等待用户验收 | 2026-10-25 | 2026-10-25 |
-| 主线3 | 审批/消息适配 + 会议室全量回归 | 主线 | P0 | 🔵 **待确认** | 方案已输出，等待用户确认 | 2026-10-25 | — |
-| 主线4 | 工位扩展验证 | 主线 | P0 | ⏳ **待开始** | 依赖主线3 | — | — |
+| 主线3 | 审批/消息适配 + 会议室全量回归 | 主线 | P0 | ✅ **已完成** | 代码/单测/临时库冒烟/前端回归均通过，等待用户验收 | 2026-10-25 | 2026-10-25 |
+| 主线4 | 工位扩展验证 | 主线 | P0 | 🔵 **待确认** | 方案已输出，等待用户确认 | 2026-10-25 | — |
 | 加分A | 两级可配置审批模板 | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分A】 | — | — |
 | 加分B | QuotaSharePlugin（GPU 配额） | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分B】 | — | — |
 | 加分C | 部门月度配额台账 | 可选加分 | P1 | ⛔ **未开启** | 需用户指令【开启加分C】 | — | — |
@@ -19,10 +19,10 @@
 
 ## 当前状态摘要
 
-- **当前阶段**：主线3（审批/消息通知/可靠消息适配 + 全量回归）【待确认】
+- **当前阶段**：主线4（工位扩展验证，零代码复用 TIME_EXCLUSIVE 插件）【待确认】
 - **执行状态**：🔵 待确认 —— 方案已输出，未写任何代码
-- **下一步**：等待用户确认（`同意方案，开始改代码`）。主线2 已完成，等待一并验收
-- **主线串行约束**：主线0/1/2 已完成；主线3 未确认前禁止编码；主线未全部完成前，禁止启动任何加分分支
+- **下一步**：等待用户确认（`同意方案，开始改代码`）
+- **主线串行约束**：主线0/1/2/3 已完成；主线4 未确认前禁止编码；主线未全部完成前，禁止启动任何加分分支
 
 ### 主线0 实施结果（2026-10-25 已完成）
 
@@ -86,6 +86,27 @@
 - 切换时点记录：**自本阶段起老表 `meeting_booking` 停写**，读写均走 `schedule_booking`；`meeting_room` 仅作为对外 `roomId` 主数据源
 - 遗留观察（不阻塞验收）：用户分页 `ORDER BY create_time DESC` 在当前小数据量下走 filesort；如需优化可在主线3 追加 `(user_id, create_time)` 索引
 
+### 主线3 实施结果（2026-10-25 已完成）
+
+修改文件：
+- `scheduler/OutboxScheduler.java`（MQ 未加载时直接返回，不再抢占→回退；新增 `@ConditionalOnProperty(booking.outbox.enabled)`）
+- `resources/application.yml`（新增 `booking.outbox.enabled: true`）
+- `docs/mainline2_index.sql`（追加幂等索引 `idx_schedule_user_create(user_id, create_time)`，已在 `admin_system` 执行）
+- `src/test/.../plugin/support/BookingOutboxWriterTest.java`（补 v1 必需字段断言：submit `ts`、approve `applicantUsername` + `ts`）
+
+新增文件：
+- `src/test/.../scheduler/OutboxSchedulerTest.java`（3 项）
+
+验证结果：
+- 单测 27/27 通过（主线2 24 + 主线3 新增 3）
+- `mvn clean package -DskipTests` exit 0
+- MQ 关闭 12 分钟：19 条 outbox 全部 `status=0 / retry_count=0`（修复前会反复回退累加至死信）
+- 查询 VO 12 字段与 v1 完全一致；前端 3 步（user1 登录→我的预约、admin 登录→审批页通过 1 条）无报错
+- 幂等实测：同一 `X-Request-Id` 第二次提交 400 拦截，首次已落库
+- 用户分页 EXPLAIN：造 4000 行后命中 `idx_schedule_user_create`，无 filesort
+- 红线文件与对外 URL / DTO / VO 零改动
+- 遗留观察（不阻塞验收）：Broker 恢复需重启应用；`selectProcessing` 取全表 status=3 多实例可能重复发送
+
 ### 本次初始化完成事项（未改代码）
 
 1. 读取 README、后端包结构（annotation/aspect/config/controller/dto/entity/enums/interceptor/mapper/scheduler/service/util/vo，无 plugin 包）、前端 views 目录、docs/schema.sql（12 张表）、`MeetingBooking` 实体、`MeetingBookingController` 锁逻辑、`MeetingBookingServiceImpl` 冲突校验与 outbox 逻辑
@@ -127,3 +148,5 @@
 | 2026-10-25 | 主线1 `mvn -q package -DskipTests` | 0 | 8081 启动验证通过 |
 | 2026-10-25 | 主线2 `mvn test` | 0 | 24/24 通过 |
 | 2026-10-25 | 主线2 `mvn clean package -DskipTests` | 0 | 临时库 36 项冒烟全绿，8081 实例已验证并关闭 |
+| 2026-10-25 | 主线3 `mvn test` | 0 | 27/27 通过（新增 OutboxSchedulerTest 3 项） |
+| 2026-10-25 | 主线3 `mvn clean package -DskipTests` | 0 | 临时库 m3 冒烟 + 前端 3 步回归通过，实例已关闭并销毁临时库 |

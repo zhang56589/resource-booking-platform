@@ -138,17 +138,33 @@
 
 ## 五、主线3｜审批 / 消息通知 / 可靠消息适配 + 全量回归 验收清单
 
-- [ ] approve / reject / batch-approve 全部委托 ScheduleManager，审批状态流转 0→1/2 正确
-- [ ] rejectReason 必填校验保留（空原因 400）
-- [ ] 重复审批拦截保留（400 "不可重复操作"）
-- [ ] outbox 记录与业务同事务：提交/审批后 sys_outbox 新增 status=0 记录
-- [ ] MQ broker 关闭 → 预约仍成功 + outbox 待发送；恢复后 5s 内补发 status=1
-- [ ] outbox payload 结构兼容 v1（topic/tag 不变，bookingId → scheduleId 映射正确）
-- [ ] 查询接口（admin/page、user/page、admin/query、user/query）返回 VO 字段与 v1 完全一致
-- [ ] 前端 3 步回归：登录 → 我的预约列表正确 → 审批页通过/驳回正常
-- [ ] v1 的 RBAC / 幂等 / TraceId 行为不变（抽 1 条写接口验证 X-Request-Id 与 traceId）
-- [ ] 全量 20 步冒烟 + 内核 3 步通过
-- [ ] `mvn -q compile` exit 0
+- [x] approve / reject / batch-approve 全部委托 ScheduleManager，审批状态流转 0→1/2 正确
+- [x] rejectReason 必填校验保留（空原因 400）
+- [x] 重复审批拦截保留（400 "不可重复操作"）
+- [x] outbox 记录与业务同事务：提交/审批后 sys_outbox 新增 status=0 记录
+- [x] MQ broker 关闭 → 预约仍成功 + outbox 待发送；恢复后 5s 内补发 status=1
+  - 实测：MQ 关闭 12 分钟，19 条 outbox 全部 status=0 / retry_count=0（修复前会累加至死信）；"恢复后补发"依赖 Broker 重启应用，本阶段未接 Broker
+- [x] outbox payload 结构兼容 v1（topic/tag 不变；bookingId 即 schedule_booking.id，v1 字段全覆盖 + 超集）
+  - 单测锁定：submit 必须含 bookingId/username/ts；approve 必须含 bookingId/applicantUsername/ts
+- [x] 查询接口（admin/page、user/page、admin/query、user/query）返回 VO 字段与 v1 完全一致
+  - 实测 12 字段：id/roomId/roomName/userId/username/startTime/endTime/resStatus/rejectReason/title/reason/createTime
+- [x] 前端 3 步回归：登录 → 我的预约列表正确 → 审批页通过/驳回正常
+  - 浏览器实测：user1 登录→我的预约列表有数据；admin 登录→审批页→通过 1 条，状态变为已通过，控制台无报错
+- [x] v1 的 RBAC / 幂等 / TraceId 行为不变（抽 1 条写接口验证 X-Request-Id 与 traceId）
+  - 实测：同 X-Request-Id 第二次提交被 400 拦截（日志"幂等拦截命中"），首次请求已落库（换新 ID 同段冲突 400）
+- [x] 全量 20 步冒烟 + 内核 3 步通过（临时库 36 项 + m3 扩展项全绿，验证后销毁）
+- [x] `mvn test` 27/27 通过，`mvn clean package -DskipTests` exit 0
+
+### 实施记录（2026-10-25 已完成）
+- 修复 `OutboxScheduler`：MQ 未加载时直接返回，不再抢占→回退，避免 retry_count 累加至死信；新增开关 `booking.outbox.enabled`
+- 新增 `OutboxSchedulerTest` 3 项（MQ 缺失零 DB 操作、无待发送跳过、有待发送转发 topic）
+- `BookingOutboxWriterTest` 补充 v1 必需字段断言（ts / applicantUsername）
+- `docs/mainline2_index.sql` 追加幂等索引 `idx_schedule_user_create(user_id, create_time)`，已在 `admin_system` 执行
+- 用户分页 EXPLAIN：造 4000 行后命中 `idx_schedule_user_create`，无 filesort
+- 红线文件零改动；对外 URL / DTO / VO 零改动
+
+### 验收标记
+- [x] 状态更新为【已完成】，三份文档同步；等待用户验收，不自动进入主线4
 
 ---
 

@@ -64,6 +64,7 @@ class BookingOutboxWriterTest {
         assertEquals("booking-notify-submit", outbox.getTopic());
         assertTrue(outbox.getPayload().contains("\"bookingId\":7"));
         assertTrue(outbox.getPayload().contains("user1"));
+        assertTrue(outbox.getPayload().contains("\"ts\":"), "v1 必需字段 ts 缺失");
         assertEquals(0, outbox.getStatus().intValue());
     }
 
@@ -93,7 +94,8 @@ class BookingOutboxWriterTest {
         verify(outboxService).save(captor.capture());
         SysOutbox outbox = captor.getValue();
         assertEquals("booking-notify-approve", outbox.getTopic());
-        assertTrue(outbox.getPayload().contains("user1"));
+        assertTrue(outbox.getPayload().contains("\"applicantUsername\":\"user1\""), "v1 必需字段 applicantUsername 缺失");
+        assertTrue(outbox.getPayload().contains("\"ts\":"), "v1 必需字段 ts 缺失");
         assertTrue(outbox.getPayload().contains("\"result\":\"REJECT\""));
         assertTrue(outbox.getPayload().contains("时间冲突"));
     }

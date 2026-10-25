@@ -71,6 +71,9 @@ booking:
   expire:
     enabled: true
     cron: "0 0/5 * * * ?"
+  outbox:
+    # MQ 未配置时即使开启也保持 outbox status=0 待发送；配置 name-server 并重启后 5s 内补发
+    enabled: true
 
 # Redisson 分布式锁日志级别（可选，生产可调到 INFO）
 logging:

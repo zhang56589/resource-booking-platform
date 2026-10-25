@@ -119,7 +119,7 @@
   - EXPLAIN 冲突查询命中 `idx_schedule_instance_time`（range）
   - 老表自本阶段起停写：新代码写/读均走 `schedule_booking`，`meeting_room` 仅作为 `roomId` 对外 ID 源
 
-### 主线3｜审批 / 消息通知 / 可靠消息链路适配 + 会议室全业务回归 ｜【待开始】
+### 主线3｜审批 / 消息通知 / 可靠消息链路适配 + 会议室全业务回归 ｜【已完成】
 
 - **目标范围**：审批、outbox、MQ 通知全部走内核，v1 会议室 20 步冒烟 + 前端 3 步全绿
 - **适配内容**：approve/cancel/batch-approve 委托 ScheduleManager；outbox payload 保持 v1 结构（topic/tag 不变，bookingId→scheduleId）；`GET /api/booking/*` 查询接口改查 `schedule_booking`（VO 字段保持不变）
@@ -134,9 +134,21 @@
   - 查询 VO 与 v1 逐字段核对：新增 `id`（=schedule_booking.id），其余 11 字段一致；roomName 改由 resource_instance 提供
   - `docs/mainline2_index.sql` 追加幂等索引 `(user_id, create_time)`，消除用户分页 filesort（主线2 EXPLAIN 观测项）
   - 回归：20 步 + 内核 3 步 + X-Request-Id 幂等 + MQ-off outbox 停留 status=0 + 前端 3 步；临时库 `admin_system_m3_test` + Redis DB2，验证后销毁
+- **实施记录（2026-10-25 已完成）**：
+  - 修复 `scheduler/OutboxScheduler.java`：`rocketMQTemplate == null` 时直接返回，不再抢占 → 回退 → 累加 `retry_count`；新增开关 `booking.outbox.enabled`（默认开启）
+  - 实测 MQ 关闭 12 分钟，19 条 outbox 全部保持 `status=0 / retry_count=0`（修复前会累加至死信）
+  - 新增 `OutboxSchedulerTest` 3 项：MQ 缺失零 DB 操作、无待发送跳过、有待发送转发至 `booking-notify-submit`
+  - `BookingOutboxWriterTest` 补充 v1 必需字段断言：submit 含 `ts`，approve 含 `applicantUsername` + `ts`
+  - 查询 VO 12 字段核验一致：`id/roomId/roomName/userId/username/startTime/endTime/resStatus/rejectReason/title/reason/createTime`
+  - `docs/mainline2_index.sql` 追加幂等索引 `idx_schedule_user_create(user_id, create_time)`，已在 `admin_system` 执行；造 4000 行后 `EXPLAIN` 命中该索引且无 filesort
+  - 幂等实测：同一 `X-Request-Id` 第二次提交被 400 拦截（日志「幂等拦截命中」），首次请求已落库
+  - 回归：临时库 36 项冒烟全绿；前端 3 步（user1 登录→我的预约有数据；admin 登录→审批页通过 1 条，控制台无报错）
+  - `mvn test` 27/27 通过（新增 3 项），`mvn clean package -DskipTests` exit 0
+  - 红线文件与对外 URL / DTO / VO 零改动
+  - 已知遗留（记录未改造）：Broker 恢复后需重启应用（`RocketMQTemplate` 启动期条件装配）；`selectProcessing` 取全表 status=3，多实例可能重复发送
 
 
-### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【待开始】
+### 主线4｜扩展能力验证：工位资源复用同一时段独占插件 ｜【待确认】
 
 - **目标范围**：只做后端验证，不做前端页面
 - **验证内容**：插入 `resource_type(WORKSTATION, TIME_EXCLUSIVE)` + 2 个工位实例 → 通过内核统一接口（`POST /api/schedule/book`）完成提交/冲突/审批/取消全流程 → 证明零代码改动复用插件
@@ -144,6 +156,14 @@
 - **风险**：① 通用接口权限模型 → 沿用登录用户 + @RequiresPermission("booking:submit")；② 与老接口重复 → 老接口保留（旨在兼容），新接口独立路径
 - **回滚**：删除 ScheduleController + seed 数据
 - **依赖**：主线 3
+- **方案输出（2026-10-25，未改代码）**：
+  - 关键发现：`TimeExclusivePlugin.supports()` 仅认 `MEETING_ROOM`，若直接新增 WORKSTATION 会被 `PluginRegistry` 判为「不支持的资源类型」；为满足「插件零改动」，改为**内核层路由增强**：`resolveByTypeCode` 先走 `supports` 快路径，未命中则回查 `resource_type.plugin_code` 再按插件编码路由（新增 `ResourceTypeMapper.selectPluginCodeByTypeCode`）。插件本身一行不改
+  - 新增通用入口：`POST /api/schedule/book`（`resourceTypeCode` + `instanceId` + 时间 + 数量 + 主题/理由）、`DELETE /api/schedule/cancel/{id}`；服务层校验「实例 type_id 必须等于 typeCode 对应 type_id」，防止拿会议室实例冒充工位
+  - 审批复用既有 `POST /api/booking/approve`：同一插件下审批按 bookingId 驱动，行为等价；不新增通用审批接口（记为遗留）
+  - 取消入口从 `schedule_booking.resource_type_id` 反查 typeCode，再委托 `ScheduleManager.cancel`（插件内已有本人/状态/未开始校验）
+  - `WebConfig` 幂等路径追加 `/api/schedule/book`、`/api/schedule/cancel/**`
+  - `docs/seed_v2.sql` 幂等插入：`WORKSTATION`（plugin_code=TIME_EXCLUSIVE）+ 2 个工位实例（`WS_A_01` / `WS_A_02`）
+  - 验证：工位同实例同时段第二次 400；工位与会议室同时间段互不干扰；审批/取消全流程；幂等；20 步会议室冒烟 + 前端 3 步回归；`git diff` 证明 `TimeExclusivePlugin.java` 零改动
 
 ---
 
@@ -197,8 +217,8 @@
 | 主线0 | 基线确认 + 数据模型 + 迁移脚本 | 主线 | P0 | 【已完成】 |
 | 主线1 | 插件接口 + ScheduleManager | 主线 | P0 | 【已完成】 |
 | 主线2 | TimeExclusivePlugin 迁移 | 主线 | P0 | 【已完成】 |
-| 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【待开始】 |
-| 主线4 | 工位扩展验证 | 主线 | P0 | 【待开始】 |
+| 主线3 | 审批/消息适配 + 全量回归 | 主线 | P0 | 【已完成】 |
+| 主线4 | 工位扩展验证 | 主线 | P0 | 【待确认】 |
 | 加分A | 两级审批模板 | 可选加分 | P1 | 【可选加分｜未开启】 |
 | 加分B | QuotaSharePlugin | 可选加分 | P1 | 【可选加分｜未开启】 |
 | 加分C | 部门月度配额台账 | 可选加分 | P1 | 【可选加分｜未开启】 |

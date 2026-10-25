@@ -9,6 +9,7 @@ import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.client.producer.SendStatus;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -28,10 +29,12 @@ import java.util.List;
  *
  * 可选加载：
  *   - RocketMQTemplate @Autowired(required=false)：不配 rocketmq.name-server 时 Bean 不加载
- *   - 此时 Scheduler 正常启动但 MQ 发送分支跳过，只做 DB 轮询
+ *   - MQ 未加载时本任务直接返回，outbox 记录保持 status=0 待发送，不抢占、不累加重试次数
+ *   - 开关：booking.outbox.enabled=false 可整体停用转发
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "booking.outbox.enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxScheduler {
 
     private static final int BATCH_SIZE = 100;
@@ -45,6 +48,11 @@ public class OutboxScheduler {
 
     @Scheduled(cron = "0/5 * * * * ?")
     public void relayOutbox() {
+        // MQ 未配置：保持 status=0 待发送。若此时抢占再回退，retry_count 会累加至死信
+        if (rocketMQTemplate == null) {
+            return;
+        }
+
         int grabbed = 0;
         try {
             grabbed = outboxService.markProcessing(BATCH_SIZE);
@@ -66,18 +74,6 @@ public class OutboxScheduler {
 
         if (processing.isEmpty()) {
             log.debug("Outbox 本次抢占 {} 条但查询为空（可能已被其他实例处理）", grabbed);
-            return;
-        }
-
-        if (rocketMQTemplate == null) {
-            // MQ Producer 未加载，把 status=3 回退为 0（下次重试）
-            log.info("Outbox RocketMQTemplate 未加载，将 {} 条处理中记录回退为待发送", processing.size());
-            for (SysOutbox outbox : processing) {
-                try {
-                    outboxService.markFailed(outbox.getId());
-                } catch (Exception ignored) {
-                }
-            }
             return;
         }
 

@@ -39,6 +39,9 @@ CALL sp_add_index_if_absent('schedule_booking',
     'idx_schedule_user_status', '`user_id`, `status`');
 CALL sp_add_index_if_absent('schedule_booking',
     'idx_schedule_type_time', '`resource_type_id`, `start_time`');
+-- 主线3：用户分页 ORDER BY create_time DESC 覆盖索引
+CALL sp_add_index_if_absent('schedule_booking',
+    'idx_schedule_user_create', '`user_id`, `create_time`');
 CALL sp_add_index_if_absent('schedule_booking_item',
     'idx_booking_item_booking', '`booking_id`');
 CALL sp_add_index_if_absent('resource_instance',
@@ -53,6 +56,6 @@ SELECT table_name, index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index) A
 FROM information_schema.statistics
 WHERE table_schema = DATABASE()
   AND index_name IN ('idx_schedule_instance_time', 'idx_schedule_user_status',
-                     'idx_schedule_type_time', 'idx_booking_item_booking',
-                     'idx_resource_instance_type_status')
+                     'idx_schedule_type_time', 'idx_schedule_user_create',
+                     'idx_booking_item_booking', 'idx_resource_instance_type_status')
 GROUP BY table_name, index_name;
